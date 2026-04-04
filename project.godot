@@ -19,11 +19,14 @@ config/icon="res://icon.svg"
 
 ColorRegistry="*res://autoload/color_registry.gd"
 InfluenceManager="*res://autoload/influence_manager.gd"
+GameClock="*res://autoload/game_clock.gd"
+Economy="*res://autoload/economy.gd"
 
 [display]
 
-window/size/viewport_width=1500
-window/size/viewport_height=1000
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/resizable=true
 window/stretch/mode="canvas_items"
 
 [physics]

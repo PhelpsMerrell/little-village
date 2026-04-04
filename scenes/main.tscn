@@ -1,148 +1,253 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
-[ext_resource type="PackedScene" path="res://scenes/wall_segment.tscn" id="2_wall"]
-[ext_resource type="PackedScene" path="res://scenes/villager.tscn" id="3_villager"]
+[ext_resource type="Script" path="res://scenes/camera.gd" id="2_camera"]
+[ext_resource type="PackedScene" path="res://scenes/room.tscn" id="3_room"]
+[ext_resource type="PackedScene" path="res://scenes/wall_segment.tscn" id="4_wall"]
+[ext_resource type="PackedScene" path="res://scenes/villager.tscn" id="5_villager"]
+[ext_resource type="PackedScene" path="res://scenes/enemy.tscn" id="6_enemy"]
+[ext_resource type="PackedScene" path="res://scenes/obstacles/water_obstacle.tscn" id="7_water"]
+[ext_resource type="PackedScene" path="res://scenes/obstacles/breakable_wall_obstacle.tscn" id="8_breakwall"]
+[ext_resource type="Script" path="res://scenes/hud.gd" id="9_hud"]
+[ext_resource type="PackedScene" path="res://scenes/collectable.tscn" id="10_collectable"]
+[ext_resource type="PackedScene" path="res://scenes/home.tscn" id="11_home"]
 
 [node name="Main" type="Node2D"]
-position = Vector2(67, 40)
 script = ExtResource("1_main")
+
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(1354, 1354)
+zoom = Vector2(0.7, 0.7)
+script = ExtResource("2_camera")
 
 [node name="Rooms" type="Node2D" parent="."]
 
-[node name="Room0" type="ColorRect" parent="Rooms"]
-offset_right = 450.0
-offset_bottom = 450.0
-mouse_filter = 2
-color = Color(0.18, 0.12, 0.12, 0.35)
+[node name="Room0" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(0, 0)
+room_id = 0
+room_color = Color(0.18, 0.12, 0.12, 0.35)
+room_label = "Room 1"
 
-[node name="Room1" type="ColorRect" parent="Rooms"]
-offset_left = 458.0
-offset_right = 908.0
-offset_bottom = 450.0
-mouse_filter = 2
-color = Color(0.18, 0.17, 0.08, 0.35)
+[node name="Room1" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(1358, 0)
+room_id = 1
+room_color = Color(0.18, 0.17, 0.08, 0.35)
+room_label = "Room 2"
 
-[node name="Room2" type="ColorRect" parent="Rooms"]
-offset_top = 458.0
-offset_right = 450.0
-offset_bottom = 908.0
-mouse_filter = 2
-color = Color(0.1, 0.13, 0.2, 0.35)
+[node name="Room2" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(0, 1358)
+room_id = 2
+room_color = Color(0.1, 0.13, 0.2, 0.35)
+room_label = "Room 3"
 
-[node name="Room3" type="ColorRect" parent="Rooms"]
-offset_left = 458.0
-offset_top = 458.0
-offset_right = 908.0
-offset_bottom = 908.0
-mouse_filter = 2
-color = Color(0.15, 0.15, 0.15, 0.35)
+[node name="Room3" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(1358, 1358)
+room_id = 3
+room_color = Color(0.15, 0.15, 0.15, 0.35)
+room_label = "Room 4"
 
-[node name="Room4" type="ColorRect" parent="Rooms"]
-offset_left = 916.0
-offset_right = 1366.0
-offset_bottom = 450.0
-mouse_filter = 2
-color = Color(0.1, 0.16, 0.2, 0.35)
+[node name="Room4" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(2716, 0)
+room_id = 4
+room_color = Color(0.1, 0.16, 0.2, 0.35)
+room_label = "Room 5 (water)"
 
-[node name="Room5" type="ColorRect" parent="Rooms"]
-offset_left = 916.0
-offset_top = 458.0
-offset_right = 1366.0
-offset_bottom = 908.0
-mouse_filter = 2
-color = Color(0.18, 0.14, 0.1, 0.35)
+[node name="Water" parent="Rooms/Room4" instance=ExtResource("7_water")]
+position = Vector2(600, 0)
+
+[node name="Room5" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(2716, 1358)
+room_id = 5
+room_color = Color(0.18, 0.14, 0.1, 0.35)
+room_label = "Room 6 (wall)"
+
+[node name="BreakableWall" parent="Rooms/Room5" instance=ExtResource("8_breakwall")]
+position = Vector2(0, 660)
+
+[node name="Room6" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 0)
+room_id = 6
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den 1"
+
+[node name="Room7" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 1358)
+room_id = 7
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den 2"
+
+[node name="Room8" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(0, 2716)
+room_id = 8
+room_color = Color(0.14, 0.16, 0.12, 0.35)
+room_label = "Stone Quarry"
 
 [node name="Walls" type="Node2D" parent="."]
 
-[node name="Wall_0_1" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_0_1" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 0
 room_b_id = 1
-start_pos = Vector2(454, 0)
-end_pos = Vector2(454, 450)
+start_pos = Vector2(1354, 0)
+end_pos = Vector2(1354, 1350)
 
-[node name="Wall_1_4" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_1_4" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 1
 room_b_id = 4
-start_pos = Vector2(912, 0)
-end_pos = Vector2(912, 450)
+start_pos = Vector2(2712, 0)
+end_pos = Vector2(2712, 1350)
 
-[node name="Wall_2_3" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_4_6" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 4
+room_b_id = 6
+start_pos = Vector2(4070, 0)
+end_pos = Vector2(4070, 1350)
+
+[node name="Wall_2_3" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 2
 room_b_id = 3
-start_pos = Vector2(454, 458)
-end_pos = Vector2(454, 908)
+start_pos = Vector2(1354, 1358)
+end_pos = Vector2(1354, 2708)
 
-[node name="Wall_3_5" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_3_5" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 3
 room_b_id = 5
-start_pos = Vector2(912, 458)
-end_pos = Vector2(912, 908)
+start_pos = Vector2(2712, 1358)
+end_pos = Vector2(2712, 2708)
 
-[node name="Wall_0_2" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_5_7" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 5
+room_b_id = 7
+start_pos = Vector2(4070, 1358)
+end_pos = Vector2(4070, 2708)
+
+[node name="Wall_0_2" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 0
 room_b_id = 2
-start_pos = Vector2(0, 454)
-end_pos = Vector2(450, 454)
+start_pos = Vector2(0, 1354)
+end_pos = Vector2(1350, 1354)
 
-[node name="Wall_1_3" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_1_3" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 1
 room_b_id = 3
-start_pos = Vector2(458, 454)
-end_pos = Vector2(908, 454)
+start_pos = Vector2(1358, 1354)
+end_pos = Vector2(2708, 1354)
 
-[node name="Wall_4_5" parent="Walls" instance=ExtResource("2_wall")]
+[node name="Wall_4_5" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 4
 room_b_id = 5
-start_pos = Vector2(916, 454)
-end_pos = Vector2(1366, 454)
+start_pos = Vector2(2716, 1354)
+end_pos = Vector2(4066, 1354)
+
+[node name="Wall_6_7" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 6
+room_b_id = 7
+start_pos = Vector2(4074, 1354)
+end_pos = Vector2(5424, 1354)
+
+[node name="Wall_2_8" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 2
+room_b_id = 8
+start_pos = Vector2(0, 2712)
+end_pos = Vector2(1350, 2712)
 
 [node name="Villagers" type="Node2D" parent="."]
 
-[node name="VillagerRed" parent="Villagers" instance=ExtResource("3_villager")]
-position = Vector2(225, 225)
+[node name="VillagerRed" parent="Villagers" instance=ExtResource("5_villager")]
+position = Vector2(675, 675)
 color_type = "red"
 
-[node name="VillagerYellow" parent="Villagers" instance=ExtResource("3_villager")]
-position = Vector2(683, 225)
+[node name="VillagerYellow" parent="Villagers" instance=ExtResource("5_villager")]
+position = Vector2(2033, 675)
 color_type = "yellow"
 
-[node name="VillagerBlue" parent="Villagers" instance=ExtResource("3_villager")]
-position = Vector2(225, 683)
+[node name="VillagerBlue" parent="Villagers" instance=ExtResource("5_villager")]
+position = Vector2(675, 2033)
 color_type = "blue"
 
-[node name="VillagerColorless" parent="Villagers" instance=ExtResource("3_villager")]
-position = Vector2(683, 683)
+[node name="VillagerColorless" parent="Villagers" instance=ExtResource("5_villager")]
+position = Vector2(2033, 2033)
 color_type = "colorless"
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="Enemy1" parent="Enemies" instance=ExtResource("6_enemy")]
+position = Vector2(4749, 675)
+
+[node name="Enemy2" parent="Enemies" instance=ExtResource("6_enemy")]
+position = Vector2(4749, 2033)
+
+[node name="Collectables" type="Node2D" parent="."]
+
+[node name="Stone01" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(120, 2850)
+
+[node name="Stone02" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(280, 2920)
+
+[node name="Stone03" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(450, 2800)
+
+[node name="Stone04" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(600, 2950)
+
+[node name="Stone05" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(750, 2830)
+
+[node name="Stone06" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(900, 2900)
+
+[node name="Stone07" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1050, 2780)
+
+[node name="Stone08" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1200, 2950)
+
+[node name="Stone09" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(150, 3100)
+
+[node name="Stone10" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(320, 3200)
+
+[node name="Stone11" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(500, 3080)
+
+[node name="Stone12" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(670, 3250)
+
+[node name="Stone13" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(830, 3150)
+
+[node name="Stone14" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(980, 3050)
+
+[node name="Stone15" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1130, 3280)
+
+[node name="Stone16" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(200, 3400)
+
+[node name="Stone17" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(450, 3500)
+
+[node name="Stone18" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(700, 3450)
+
+[node name="Stone19" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(950, 3380)
+
+[node name="Stone20" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1200, 3500)
+
+[node name="Homes" type="Node2D" parent="."]
 
 [node name="UI" type="CanvasLayer" parent="."]
 layer = 10
 
-[node name="HintLabel" type="Label" parent="UI"]
-offset_left = 10.0
-offset_top = 960.0
-offset_right = 1490.0
-offset_bottom = 980.0
+[node name="HUD" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
-theme_override_font_sizes/font_size = 14
-theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
-text = "Drag villagers  •  Click walls to toggle  •  Blues swim  •  Reds break walls"
-
-[node name="LegendLabel" type="Label" parent="UI"]
-offset_left = 10.0
-offset_top = 8.0
-offset_right = 1490.0
-offset_bottom = 26.0
-mouse_filter = 2
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
-text = "Red→Yellow(×2)→Blue→Red   |   Shift: 10s base   |   Decay: 1.3×"
-
-[node name="CountLabel" type="Label" parent="UI"]
-offset_left = 10.0
-offset_top = 28.0
-offset_right = 1490.0
-offset_bottom = 46.0
-mouse_filter = 2
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+script = ExtResource("9_hud")
