@@ -1,5 +1,6 @@
 extends Node2D
-## Small collectable on the ground. Only yellows pick it up (touch to collect).
+## Stone on the ground. Only yellows pick it up — sets carrying_stone = true.
+## Stone is NOT credited to economy until deposited at a bank.
 
 const RADIUS := 12.0
 var collected: bool = false
@@ -20,10 +21,12 @@ func try_collect(villager: Node) -> bool:
 		return false
 	if str(villager.color_type) != "yellow":
 		return false
+	if villager.carrying_stone:
+		return false   # already carrying one
 	var dist: float = villager.global_position.distance_to(global_position)
 	if dist < float(villager.radius) + RADIUS + 4.0:
 		collected = true
-		Economy.add_stone(1)
+		villager.carrying_stone = true
 		queue_redraw()
 		var tw := create_tween()
 		tw.tween_property(self, "modulate:a", 0.0, 0.3)

@@ -1,12 +1,12 @@
 extends Node
-## Tracks player currency (stone collected by blues) and purchases.
+## Tracks player resources (stone, fish) and purchases.
 
-signal currency_changed(amount: int)
+signal currency_changed()
 signal item_purchased(item_id: String)
 
 var stone: int = 0
+var fish: int = 0
 
-# Shop catalog: id → {cost, name, description}
 var _shop: Dictionary = {}
 
 
@@ -24,7 +24,12 @@ func get_shop_items() -> Dictionary:
 
 func add_stone(amount: int = 1) -> void:
 	stone += amount
-	currency_changed.emit(stone)
+	currency_changed.emit()
+
+
+func add_fish(amount: int = 1) -> void:
+	fish += amount
+	currency_changed.emit()
 
 
 func can_afford(item_id: String) -> bool:
@@ -37,6 +42,6 @@ func purchase(item_id: String) -> bool:
 	if not can_afford(item_id):
 		return false
 	stone -= _shop[item_id]["cost"]
-	currency_changed.emit(stone)
+	currency_changed.emit()
 	item_purchased.emit(item_id)
 	return true

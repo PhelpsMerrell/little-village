@@ -1,12 +1,13 @@
 extends Node
 ## Processes color influence each physics frame.
 ## Range-based: influence within ~7.5× radius, stronger when closer.
+## Level-aware: influencer level must be >= target level to affect them.
 ## Sets influence_attractor on targets so they drift toward influencers.
 
 const SHIFT_MAX := 100.0
 const BASE_SHIFT_SPEED := 18.0
 const DECAY_MULTIPLIER := 1.3
-const INFLUENCE_RANGE_MULT := 7.5   # 3× bigger: red=210px, yellow=165px, blue=270px
+const INFLUENCE_RANGE_MULT := 7.5
 const MIN_PROXIMITY_FACTOR := 0.15
 
 signal villager_shifted(villager: Node, old_color: String, new_color: String, spawn_count: int)
@@ -14,12 +15,10 @@ signal villager_shifted(villager: Node, old_color: String, new_color: String, sp
 
 func process_influence(room_villagers: Dictionary, wall_data: Array, delta: float) -> void:
 	var groups := _find_connected_groups(room_villagers.keys(), wall_data)
-	# Reset all attractors before processing
 	for rid in room_villagers:
 		for v in room_villagers[rid]:
 			v.is_being_influenced = false
 			v.influence_attractor = Vector2.ZERO
-
 	for group in groups:
 		var all_v: Array = []
 		for room_id in group:
@@ -35,7 +34,6 @@ func _find_connected_groups(room_ids: Array, wall_data: Array) -> Array[Array]:
 		if w["is_open"]:
 			adj[w["room_a"]].append(w["room_b"])
 			adj[w["room_b"]].append(w["room_a"])
-
 	var visited: Dictionary = {}
 	var groups: Array[Array] = []
 	for rid in room_ids:
@@ -61,8 +59,26 @@ func _proximity_factor(src_pos: Vector2, tgt_pos: Vector2, src_radius: float) ->
 	var max_range: float = src_radius * INFLUENCE_RANGE_MULT
 	if dist >= max_range:
 		return 0.0
-	var t: float = dist / max_range
-	return lerpf(1.0, MIN_PROXIMITY_FACTOR, t)
+	return lerpf(1.0, MIN_PROXIMITY_FACTOR, dist / max_range)
+
+
+## Level gate: influencer must be >= target level to affect them.
+## Exception: yellow L3 is always influenceable.
+func _level_multiplier(src_level: int, target: Node) -> float:
+	var tgt_level: int = target.level
+	# Yellow L3 exception: always influenceable
+	if target.color_type == "yellow" and tgt_level == 3:
+		return 1.0
+	# L3 targets are immune to all influence
+	if tgt_level == 3:
+		return 0.0
+	# Source must be at least target's level
+	if src_level < tgt_level:
+		return 0.0
+	# L2 targets get reduced influence even from L2+ sources
+	if tgt_level == 2:
+		return 0.2
+	return 1.0
 
 
 func _process_group(villagers: Array, delta: float) -> void:
@@ -94,49 +110,52 @@ func _process_group(villagers: Array, delta: float) -> void:
 		var stack_bonus: float = src_def.get("stacking_bonus", 0.1)
 		var src_radius: float = float(src_def.get("radius", 22))
 
-		var valid_targets: Array = []
+		# Pre-filter targets by color and negation (NOT by level — level is per-source)
+		var color_valid_targets: Array = []
 		for v in villagers:
 			if v.color_type in targets_colors:
-				var inf_mult: float = v.get_influence_multiplier()
-				if inf_mult <= 0.0:
-					continue
 				var v_def: Dictionary = ColorRegistry.get_def(v.color_type)
 				var shift_key: String = v.color_type + "->" + v_def.get("shifts_to", "")
 				if shift_key not in negations:
-					valid_targets.append(v)
-		if valid_targets.is_empty():
+					color_valid_targets.append(v)
+		if color_valid_targets.is_empty():
 			continue
 
 		if delivery == "single_target":
 			var claimed: Dictionary = {}
 			for src in src_list:
-				for t in valid_targets:
+				var src_lv: int = src.level
+				for t in color_valid_targets:
 					if claimed.has(t):
+						continue
+					var lv_mult: float = _level_multiplier(src_lv, t)
+					if lv_mult <= 0.0:
 						continue
 					var prox: float = _proximity_factor(src.global_position, t.global_position, src_radius)
 					if prox <= 0.0:
 						continue
-					var t_mult: float = t.get_influence_multiplier()
-					inf_rate[t] += base_rate * prox * t_mult
+					inf_rate[t] += base_rate * prox * lv_mult
 					attractor_sum[t] += src.global_position * prox
 					attractor_weight[t] += prox
 					claimed[t] = true
 					break
 		else:
-			for t in valid_targets:
-				var t_mult: float = t.get_influence_multiplier()
+			for t in color_valid_targets:
 				var total_for_target: float = 0.0
 				var in_range_count: int = 0
 				for src in src_list:
+					var lv_mult: float = _level_multiplier(src.level, t)
+					if lv_mult <= 0.0:
+						continue
 					var prox: float = _proximity_factor(src.global_position, t.global_position, src_radius)
 					if prox > 0.0:
-						total_for_target += base_rate * prox
+						total_for_target += base_rate * prox * lv_mult
 						in_range_count += 1
 						attractor_sum[t] += src.global_position * prox
 						attractor_weight[t] += prox
 				if in_range_count > 1:
 					total_for_target += stack_bonus * (in_range_count - 1)
-				inf_rate[t] += total_for_target * t_mult
+				inf_rate[t] += total_for_target
 
 	var shift_queue: Array = []
 	for v in villagers:
@@ -155,7 +174,6 @@ func _process_group(villagers: Array, delta: float) -> void:
 				shift_queue.append(v)
 		else:
 			_apply_decay(v, delta)
-
 	for v in shift_queue:
 		_trigger_shift(v)
 

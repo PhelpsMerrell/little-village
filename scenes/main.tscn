@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scenes/camera.gd" id="2_camera"]
@@ -11,13 +11,17 @@
 [ext_resource type="Script" path="res://scenes/hud.gd" id="9_hud"]
 [ext_resource type="PackedScene" path="res://scenes/collectable.tscn" id="10_collectable"]
 [ext_resource type="PackedScene" path="res://scenes/home.tscn" id="11_home"]
+[ext_resource type="PackedScene" path="res://scenes/bank.tscn" id="12_bank"]
+[ext_resource type="PackedScene" path="res://scenes/obstacles/river_obstacle.tscn" id="13_river"]
+[ext_resource type="PackedScene" path="res://scenes/fish_spot.tscn" id="14_fish"]
+[ext_resource type="PackedScene" path="res://scenes/fishing_hut.tscn" id="15_hut"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
 [node name="Camera" type="Camera2D" parent="."]
-position = Vector2(1354, 1354)
-zoom = Vector2(0.7, 0.7)
+position = Vector2(4074, 2716)
+zoom = Vector2(0.35, 0.35)
 script = ExtResource("2_camera")
 
 [node name="Rooms" type="Node2D" parent="."]
@@ -26,129 +30,396 @@ script = ExtResource("2_camera")
 position = Vector2(0, 0)
 room_id = 0
 room_color = Color(0.18, 0.12, 0.12, 0.35)
-room_label = "Room 1"
+room_label = "Red Start"
 
 [node name="Room1" parent="Rooms" instance=ExtResource("3_room")]
 position = Vector2(1358, 0)
 room_id = 1
 room_color = Color(0.18, 0.17, 0.08, 0.35)
-room_label = "Room 2"
+room_label = "Yellow + Bank"
 
 [node name="Room2" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(0, 1358)
-room_id = 2
-room_color = Color(0.1, 0.13, 0.2, 0.35)
-room_label = "Room 3"
-
-[node name="Room3" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(1358, 1358)
-room_id = 3
-room_color = Color(0.15, 0.15, 0.15, 0.35)
-room_label = "Room 4"
-
-[node name="Room4" parent="Rooms" instance=ExtResource("3_room")]
 position = Vector2(2716, 0)
-room_id = 4
+room_id = 2
 room_color = Color(0.1, 0.16, 0.2, 0.35)
-room_label = "Room 5 (water)"
+room_label = "Water Crossing"
 
-[node name="Water" parent="Rooms/Room4" instance=ExtResource("7_water")]
+[node name="Water" parent="Rooms/Room2" instance=ExtResource("7_water")]
 position = Vector2(600, 0)
 
-[node name="Room5" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(2716, 1358)
-room_id = 5
-room_color = Color(0.18, 0.14, 0.1, 0.35)
-room_label = "Room 6 (wall)"
+[node name="Room3" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 0)
+room_id = 3
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den"
 
-[node name="BreakableWall" parent="Rooms/Room5" instance=ExtResource("8_breakwall")]
-position = Vector2(0, 660)
+[node name="Room4" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(5432, 0)
+room_id = 4
+room_color = Color(0.14, 0.14, 0.14, 0.35)
+room_label = "Passage"
+
+[node name="Room5" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(6790, 0)
+room_id = 5
+room_color = Color(0.14, 0.16, 0.12, 0.35)
+room_label = "Stone Field"
 
 [node name="Room6" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(4074, 0)
+position = Vector2(0, 1358)
 room_id = 6
-room_color = Color(0.12, 0.08, 0.08, 0.35)
-room_label = "Enemy Den 1"
+room_color = Color(0.1, 0.13, 0.2, 0.35)
+room_label = "Blue Start"
 
 [node name="Room7" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(4074, 1358)
+position = Vector2(1358, 1358)
 room_id = 7
-room_color = Color(0.12, 0.08, 0.08, 0.35)
-room_label = "Enemy Den 2"
+room_color = Color(0.13, 0.13, 0.13, 0.35)
+room_label = "Colorless Chamber"
 
 [node name="Room8" parent="Rooms" instance=ExtResource("3_room")]
-position = Vector2(0, 2716)
+position = Vector2(2716, 1358)
 room_id = 8
+room_color = Color(0.18, 0.14, 0.1, 0.35)
+room_label = "Barricade"
+
+[node name="BreakableWall" parent="Rooms/Room8" instance=ExtResource("8_breakwall")]
+position = Vector2(0, 660)
+
+[node name="Room9" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 1358)
+room_id = 9
+room_color = Color(0.14, 0.14, 0.14, 0.35)
+room_label = "Passage"
+
+[node name="Room10" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(5432, 1358)
+room_id = 10
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den"
+
+[node name="Room11" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(6790, 1358)
+room_id = 11
+room_color = Color(0.1, 0.14, 0.16, 0.35)
+room_label = "Flooded Quarry"
+
+[node name="Water" parent="Rooms/Room11" instance=ExtResource("7_water")]
+position = Vector2(600, 0)
+
+[node name="Room12" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(0, 2716)
+room_id = 12
+room_color = Color(0.14, 0.14, 0.14, 0.35)
+room_label = "Passage"
+
+[node name="Room13" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(1358, 2716)
+room_id = 13
 room_color = Color(0.14, 0.16, 0.12, 0.35)
 room_label = "Stone Quarry"
 
+[node name="Room14" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(2716, 2716)
+room_id = 14
+room_color = Color(0.16, 0.14, 0.1, 0.35)
+room_label = "Walled Quarry"
+
+[node name="BreakableWall" parent="Rooms/Room14" instance=ExtResource("8_breakwall")]
+position = Vector2(0, 660)
+
+[node name="Room15" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 2716)
+room_id = 15
+room_color = Color(0.08, 0.14, 0.2, 0.35)
+room_label = "River Delta"
+
+[node name="River" parent="Rooms/Room15" instance=ExtResource("13_river")]
+position = Vector2(100, 50)
+
+[node name="Room16" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(5432, 2716)
+room_id = 16
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den"
+
+[node name="Room17" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(6790, 2716)
+room_id = 17
+room_color = Color(0.14, 0.16, 0.12, 0.35)
+room_label = "Stone Field"
+
+[node name="Room18" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(0, 4074)
+room_id = 18
+room_color = Color(0.1, 0.15, 0.18, 0.35)
+room_label = "Shallows"
+
+[node name="Water" parent="Rooms/Room18" instance=ExtResource("7_water")]
+position = Vector2(600, 0)
+
+[node name="Room19" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(1358, 4074)
+room_id = 19
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den"
+
+[node name="Room20" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(2716, 4074)
+room_id = 20
+room_color = Color(0.14, 0.16, 0.12, 0.35)
+room_label = "Stone Mine"
+
+[node name="Room21" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(4074, 4074)
+room_id = 21
+room_color = Color(0.18, 0.14, 0.1, 0.35)
+room_label = "Fortification"
+
+[node name="BreakableWall" parent="Rooms/Room21" instance=ExtResource("8_breakwall")]
+position = Vector2(0, 660)
+
+[node name="Room22" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(5432, 4074)
+room_id = 22
+room_color = Color(0.14, 0.14, 0.14, 0.35)
+room_label = "Passage"
+
+[node name="Room23" parent="Rooms" instance=ExtResource("3_room")]
+position = Vector2(6790, 4074)
+room_id = 23
+room_color = Color(0.12, 0.08, 0.08, 0.35)
+room_label = "Enemy Den"
+
 [node name="Walls" type="Node2D" parent="."]
 
-[node name="Wall_0_1" parent="Walls" instance=ExtResource("4_wall")]
+[node name="Wall_H0" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 0
 room_b_id = 1
 start_pos = Vector2(1354, 0)
 end_pos = Vector2(1354, 1350)
 
-[node name="Wall_1_4" parent="Walls" instance=ExtResource("4_wall")]
+[node name="Wall_H1" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 1
-room_b_id = 4
+room_b_id = 2
 start_pos = Vector2(2712, 0)
 end_pos = Vector2(2712, 1350)
 
-[node name="Wall_4_6" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 4
-room_b_id = 6
+[node name="Wall_H2" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 2
+room_b_id = 3
 start_pos = Vector2(4070, 0)
 end_pos = Vector2(4070, 1350)
 
-[node name="Wall_2_3" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 2
-room_b_id = 3
+[node name="Wall_H3" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 3
+room_b_id = 4
+start_pos = Vector2(5428, 0)
+end_pos = Vector2(5428, 1350)
+
+[node name="Wall_H4" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 4
+room_b_id = 5
+start_pos = Vector2(6786, 0)
+end_pos = Vector2(6786, 1350)
+
+[node name="Wall_H5" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 6
+room_b_id = 7
 start_pos = Vector2(1354, 1358)
 end_pos = Vector2(1354, 2708)
 
-[node name="Wall_3_5" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 3
-room_b_id = 5
+[node name="Wall_H6" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 7
+room_b_id = 8
 start_pos = Vector2(2712, 1358)
 end_pos = Vector2(2712, 2708)
 
-[node name="Wall_5_7" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 5
-room_b_id = 7
+[node name="Wall_H7" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 8
+room_b_id = 9
 start_pos = Vector2(4070, 1358)
 end_pos = Vector2(4070, 2708)
 
-[node name="Wall_0_2" parent="Walls" instance=ExtResource("4_wall")]
+[node name="Wall_H8" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 9
+room_b_id = 10
+start_pos = Vector2(5428, 1358)
+end_pos = Vector2(5428, 2708)
+
+[node name="Wall_H9" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 10
+room_b_id = 11
+start_pos = Vector2(6786, 1358)
+end_pos = Vector2(6786, 2708)
+
+[node name="Wall_H10" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 12
+room_b_id = 13
+start_pos = Vector2(1354, 2716)
+end_pos = Vector2(1354, 4066)
+
+[node name="Wall_H11" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 13
+room_b_id = 14
+start_pos = Vector2(2712, 2716)
+end_pos = Vector2(2712, 4066)
+
+[node name="Wall_H12" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 14
+room_b_id = 15
+start_pos = Vector2(4070, 2716)
+end_pos = Vector2(4070, 4066)
+
+[node name="Wall_H13" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 15
+room_b_id = 16
+start_pos = Vector2(5428, 2716)
+end_pos = Vector2(5428, 4066)
+
+[node name="Wall_H14" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 16
+room_b_id = 17
+start_pos = Vector2(6786, 2716)
+end_pos = Vector2(6786, 4066)
+
+[node name="Wall_H15" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 18
+room_b_id = 19
+start_pos = Vector2(1354, 4074)
+end_pos = Vector2(1354, 5424)
+
+[node name="Wall_H16" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 19
+room_b_id = 20
+start_pos = Vector2(2712, 4074)
+end_pos = Vector2(2712, 5424)
+
+[node name="Wall_H17" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 20
+room_b_id = 21
+start_pos = Vector2(4070, 4074)
+end_pos = Vector2(4070, 5424)
+
+[node name="Wall_H18" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 21
+room_b_id = 22
+start_pos = Vector2(5428, 4074)
+end_pos = Vector2(5428, 5424)
+
+[node name="Wall_H19" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 22
+room_b_id = 23
+start_pos = Vector2(6786, 4074)
+end_pos = Vector2(6786, 5424)
+
+[node name="Wall_V20" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 0
-room_b_id = 2
+room_b_id = 6
 start_pos = Vector2(0, 1354)
 end_pos = Vector2(1350, 1354)
 
-[node name="Wall_1_3" parent="Walls" instance=ExtResource("4_wall")]
+[node name="Wall_V21" parent="Walls" instance=ExtResource("4_wall")]
 room_a_id = 1
-room_b_id = 3
+room_b_id = 7
 start_pos = Vector2(1358, 1354)
 end_pos = Vector2(2708, 1354)
 
-[node name="Wall_4_5" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 4
-room_b_id = 5
+[node name="Wall_V22" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 2
+room_b_id = 8
 start_pos = Vector2(2716, 1354)
 end_pos = Vector2(4066, 1354)
 
-[node name="Wall_6_7" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 6
-room_b_id = 7
+[node name="Wall_V23" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 3
+room_b_id = 9
 start_pos = Vector2(4074, 1354)
 end_pos = Vector2(5424, 1354)
 
-[node name="Wall_2_8" parent="Walls" instance=ExtResource("4_wall")]
-room_a_id = 2
-room_b_id = 8
+[node name="Wall_V24" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 4
+room_b_id = 10
+start_pos = Vector2(5432, 1354)
+end_pos = Vector2(6782, 1354)
+
+[node name="Wall_V25" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 5
+room_b_id = 11
+start_pos = Vector2(6790, 1354)
+end_pos = Vector2(8140, 1354)
+
+[node name="Wall_V26" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 6
+room_b_id = 12
 start_pos = Vector2(0, 2712)
 end_pos = Vector2(1350, 2712)
+
+[node name="Wall_V27" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 7
+room_b_id = 13
+start_pos = Vector2(1358, 2712)
+end_pos = Vector2(2708, 2712)
+
+[node name="Wall_V28" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 8
+room_b_id = 14
+start_pos = Vector2(2716, 2712)
+end_pos = Vector2(4066, 2712)
+
+[node name="Wall_V29" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 9
+room_b_id = 15
+start_pos = Vector2(4074, 2712)
+end_pos = Vector2(5424, 2712)
+
+[node name="Wall_V30" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 10
+room_b_id = 16
+start_pos = Vector2(5432, 2712)
+end_pos = Vector2(6782, 2712)
+
+[node name="Wall_V31" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 11
+room_b_id = 17
+start_pos = Vector2(6790, 2712)
+end_pos = Vector2(8140, 2712)
+
+[node name="Wall_V32" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 12
+room_b_id = 18
+start_pos = Vector2(0, 4070)
+end_pos = Vector2(1350, 4070)
+
+[node name="Wall_V33" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 13
+room_b_id = 19
+start_pos = Vector2(1358, 4070)
+end_pos = Vector2(2708, 4070)
+
+[node name="Wall_V34" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 14
+room_b_id = 20
+start_pos = Vector2(2716, 4070)
+end_pos = Vector2(4066, 4070)
+
+[node name="Wall_V35" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 15
+room_b_id = 21
+start_pos = Vector2(4074, 4070)
+end_pos = Vector2(5424, 4070)
+
+[node name="Wall_V36" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 16
+room_b_id = 22
+start_pos = Vector2(5432, 4070)
+end_pos = Vector2(6782, 4070)
+
+[node name="Wall_V37" parent="Walls" instance=ExtResource("4_wall")]
+room_a_id = 17
+room_b_id = 23
+start_pos = Vector2(6790, 4070)
+end_pos = Vector2(8140, 4070)
 
 [node name="Villagers" type="Node2D" parent="."]
 
@@ -170,73 +441,283 @@ color_type = "colorless"
 
 [node name="Enemies" type="Node2D" parent="."]
 
-[node name="Enemy1" parent="Enemies" instance=ExtResource("6_enemy")]
+[node name="Enemy0" parent="Enemies" instance=ExtResource("6_enemy")]
 position = Vector2(4749, 675)
 
+[node name="Enemy1" parent="Enemies" instance=ExtResource("6_enemy")]
+position = Vector2(6107, 2033)
+
 [node name="Enemy2" parent="Enemies" instance=ExtResource("6_enemy")]
-position = Vector2(4749, 2033)
+position = Vector2(6107, 3391)
+
+[node name="Enemy3" parent="Enemies" instance=ExtResource("6_enemy")]
+position = Vector2(2033, 4749)
+
+[node name="Enemy4" parent="Enemies" instance=ExtResource("6_enemy")]
+position = Vector2(7465, 4749)
 
 [node name="Collectables" type="Node2D" parent="."]
 
-[node name="Stone01" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(120, 2850)
+[node name="Stone000" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7098, 131)
 
-[node name="Stone02" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(280, 2920)
+[node name="Stone001" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7433, 581)
 
-[node name="Stone03" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(450, 2800)
+[node name="Stone002" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7327, 365)
 
-[node name="Stone04" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(600, 2950)
+[node name="Stone003" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7079, 1196)
 
-[node name="Stone05" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(750, 2830)
+[node name="Stone004" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7048, 944)
 
-[node name="Stone06" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(900, 2900)
+[node name="Stone005" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(6935, 141)
 
-[node name="Stone07" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(1050, 2780)
+[node name="Stone006" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7061, 527)
 
-[node name="Stone08" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(1200, 2950)
+[node name="Stone007" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7346, 1114)
 
-[node name="Stone09" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(150, 3100)
+[node name="Stone008" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(6924, 1229)
 
-[node name="Stone10" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(320, 3200)
+[node name="Stone009" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7277, 1196)
 
-[node name="Stone11" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(500, 3080)
+[node name="Stone010" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7729, 1889)
 
-[node name="Stone12" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(670, 3250)
+[node name="Stone011" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7789, 2007)
 
-[node name="Stone13" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(830, 3150)
+[node name="Stone012" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(6883, 1764)
 
-[node name="Stone14" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(980, 3050)
+[node name="Stone013" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7735, 2134)
 
-[node name="Stone15" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(1130, 3280)
+[node name="Stone014" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7439, 1756)
 
-[node name="Stone16" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(200, 3400)
+[node name="Stone015" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7310, 2127)
 
-[node name="Stone17" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(450, 3500)
+[node name="Stone016" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7079, 1627)
 
-[node name="Stone18" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(700, 3450)
+[node name="Stone017" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7648, 1636)
 
-[node name="Stone19" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(950, 3380)
+[node name="Stone018" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2173, 3500)
 
-[node name="Stone20" parent="Collectables" instance=ExtResource("10_collectable")]
-position = Vector2(1200, 3500)
+[node name="Stone019" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1979, 2884)
+
+[node name="Stone020" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2378, 3894)
+
+[node name="Stone021" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1693, 3571)
+
+[node name="Stone022" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1599, 3926)
+
+[node name="Stone023" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2038, 3536)
+
+[node name="Stone024" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2620, 3189)
+
+[node name="Stone025" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1580, 2889)
+
+[node name="Stone026" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1904, 3388)
+
+[node name="Stone027" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1601, 3272)
+
+[node name="Stone028" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1644, 3574)
+
+[node name="Stone029" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2007, 3724)
+
+[node name="Stone030" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2185, 3129)
+
+[node name="Stone031" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2196, 3523)
+
+[node name="Stone032" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1867, 3342)
+
+[node name="Stone033" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1584, 3146)
+
+[node name="Stone034" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2531, 3297)
+
+[node name="Stone035" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(1772, 3742)
+
+[node name="Stone036" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2215, 3348)
+
+[node name="Stone037" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2578, 3245)
+
+[node name="Stone038" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3460, 2910)
+
+[node name="Stone039" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3265, 2861)
+
+[node name="Stone040" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3442, 3617)
+
+[node name="Stone041" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3344, 2931)
+
+[node name="Stone042" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3228, 3957)
+
+[node name="Stone043" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3440, 3231)
+
+[node name="Stone044" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3818, 3606)
+
+[node name="Stone045" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3735, 3088)
+
+[node name="Stone046" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3338, 3081)
+
+[node name="Stone047" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3301, 3945)
+
+[node name="Stone048" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7973, 3334)
+
+[node name="Stone049" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7747, 3613)
+
+[node name="Stone050" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7611, 3245)
+
+[node name="Stone051" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7153, 3839)
+
+[node name="Stone052" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7880, 2982)
+
+[node name="Stone053" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(6966, 3020)
+
+[node name="Stone054" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7183, 3123)
+
+[node name="Stone055" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7734, 2926)
+
+[node name="Stone056" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7658, 3577)
+
+[node name="Stone057" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(7828, 3879)
+
+[node name="Stone058" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3310, 5287)
+
+[node name="Stone059" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2819, 4388)
+
+[node name="Stone060" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3895, 4700)
+
+[node name="Stone061" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3492, 4382)
+
+[node name="Stone062" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3397, 5044)
+
+[node name="Stone063" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3119, 5083)
+
+[node name="Stone064" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(2802, 4693)
+
+[node name="Stone065" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3821, 4519)
+
+[node name="Stone066" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3835, 4371)
+
+[node name="Stone067" parent="Collectables" instance=ExtResource("10_collectable")]
+position = Vector2(3407, 5193)
+
+[node name="FishSpots" type="Node2D" parent="."]
+
+[node name="Fish00" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4400, 3575)
+
+[node name="Fish01" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4296, 3162)
+
+[node name="Fish02" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4311, 3304)
+
+[node name="Fish03" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4262, 2973)
+
+[node name="Fish04" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4322, 3580)
+
+[node name="Fish05" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4465, 3899)
+
+[node name="Fish06" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4239, 3798)
+
+[node name="Fish07" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4296, 3659)
+
+[node name="Fish08" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4563, 3239)
+
+[node name="Fish09" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4599, 3561)
+
+[node name="Fish10" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4615, 3590)
+
+[node name="Fish11" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4635, 3231)
+
+[node name="Fish12" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4271, 3741)
+
+[node name="Fish13" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4532, 3162)
+
+[node name="Fish14" parent="FishSpots" instance=ExtResource("14_fish")]
+position = Vector2(4629, 3957)
+
+[node name="Banks" type="Node2D" parent="."]
+
+[node name="Bank1" parent="Banks" instance=ExtResource("12_bank")]
+position = Vector2(2033, 200)
+
+[node name="FishingHuts" type="Node2D" parent="."]
+
+[node name="Hut1" parent="FishingHuts" instance=ExtResource("15_hut")]
+position = Vector2(5224, 3391)
 
 [node name="Homes" type="Node2D" parent="."]
 

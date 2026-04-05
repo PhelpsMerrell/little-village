@@ -1,9 +1,8 @@
 extends Node2D
 ## Black circle enemy with levels. Wanders, duplicates (L1 only), merges (4→next).
-## L1: circle 50hp, L2: square 50hp, L3: triangle 150hp. L3 does NOT duplicate.
-## Red damage: L1=50, L2=75, L3=150.
+## Gets STUNNED when hitting a blue villager.
 
-enum State { MOVING, PAUSED }
+enum State { MOVING, PAUSED, STUNNED }
 
 const BASE_RADIUS := 28.0
 const SPEED := 40.0
@@ -13,10 +12,9 @@ const PAUSE_MAX := 2.5
 
 const BLUE_DAMAGE := 40.0
 const HIT_COOLDOWN := 1.0
+const STUN_DURATION := 2.5       # seconds stunned after hitting blue
 
-# Health per enemy level
 const HEALTH_BY_LEVEL := {1: 50.0, 2: 50.0, 3: 150.0}
-# Red damage per red level
 const RED_DAMAGE := {1: 50.0, 2: 75.0, 3: 150.0}
 
 var level: int = 1
@@ -27,12 +25,12 @@ var current_room_id: int = -1
 var room_bounds: Rect2 = Rect2()
 var is_dead: bool = false
 
-## Duplication meter — L1 only.
 var dupe_meter: float = 0.0
 
 var _hit_cooldowns: Dictionary = {}
 var _state: State = State.PAUSED
 var _state_timer: float = randf_range(0.3, 1.2)
+var _stun_timer: float = 0.0
 var _move_target: Vector2 = Vector2.ZERO
 
 var _dragging := false
@@ -66,6 +64,10 @@ func _sync_level() -> void:
 		_col_shape.shape = shape
 
 
+func is_stunned() -> bool:
+	return _state == State.STUNNED
+
+
 func _process(delta: float) -> void:
 	if is_dead:
 		return
@@ -83,6 +85,8 @@ func _process(delta: float) -> void:
 				_do_moving(delta)
 			State.PAUSED:
 				_do_paused(delta)
+			State.STUNNED:
+				_do_stunned(delta)
 	queue_redraw()
 
 
@@ -105,6 +109,13 @@ func _do_paused(delta: float) -> void:
 			_state = State.MOVING
 		else:
 			_state_timer = 0.5
+
+
+func _do_stunned(delta: float) -> void:
+	_stun_timer -= delta
+	if _stun_timer <= 0.0:
+		_state = State.PAUSED
+		_state_timer = randf_range(0.3, 0.8)
 
 
 func _pick_wander_target() -> bool:
@@ -142,6 +153,8 @@ func _input(event: InputEvent) -> void:
 
 ## Enemy attacks a villager. Called by main.gd.
 func try_attack(villager: Node) -> String:
+	if is_stunned():
+		return "immune"
 	if _hit_cooldowns.has(villager):
 		return "immune"
 	var color: String = str(villager.color_type)
@@ -153,6 +166,9 @@ func try_attack(villager: Node) -> String:
 	elif color == "blue":
 		_hit_cooldowns[villager] = HIT_COOLDOWN
 		villager.health -= BLUE_DAMAGE
+		# Stun self after hitting blue
+		_state = State.STUNNED
+		_stun_timer = STUN_DURATION
 		if villager.health <= 0.0:
 			return "kill"
 		return "hit"
@@ -177,6 +193,11 @@ func _draw() -> void:
 	var body_color := Color(0.1, 0.1, 0.1)
 	var outline_color := Color(0.4, 0.08, 0.08)
 
+	# Stunned visual — lighter, dizzy
+	if _state == State.STUNNED:
+		body_color = Color(0.25, 0.2, 0.2)
+		outline_color = Color(0.5, 0.4, 0.1)
+
 	match level:
 		1:
 			draw_circle(Vector2.ZERO, radius, body_color)
@@ -198,8 +219,22 @@ func _draw() -> void:
 
 	# Eyes
 	var es := radius / BASE_RADIUS
-	draw_circle(Vector2(-8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
-	draw_circle(Vector2(8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
+	if _state == State.STUNNED:
+		# Dizzy X eyes
+		var ex1 := Vector2(-8 * es, -6 * es)
+		var ex2 := Vector2(8 * es, -6 * es)
+		var xs := 3.0 * es
+		draw_line(ex1 + Vector2(-xs, -xs), ex1 + Vector2(xs, xs), Color(0.9, 0.8, 0.2), 2.0)
+		draw_line(ex1 + Vector2(xs, -xs), ex1 + Vector2(-xs, xs), Color(0.9, 0.8, 0.2), 2.0)
+		draw_line(ex2 + Vector2(-xs, -xs), ex2 + Vector2(xs, xs), Color(0.9, 0.8, 0.2), 2.0)
+		draw_line(ex2 + Vector2(xs, -xs), ex2 + Vector2(-xs, xs), Color(0.9, 0.8, 0.2), 2.0)
+		# Stars above head
+		draw_string(ThemeDB.fallback_font,
+			Vector2(-radius * 0.5, -radius - 8), "***",
+			HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(0.9, 0.8, 0.2, 0.7))
+	else:
+		draw_circle(Vector2(-8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
+		draw_circle(Vector2(8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
 
 	# Level text
 	if level > 1:
@@ -207,7 +242,7 @@ func _draw() -> void:
 			Vector2(-radius, radius + 14.0), "L%d" % level,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.2, 0.2, 0.8))
 
-	# Health bar (L3 only, since L1/L2 die in one hit)
+	# Health bar (L3 only)
 	if level == 3:
 		var bw := radius * 2.0
 		var bx := -radius
