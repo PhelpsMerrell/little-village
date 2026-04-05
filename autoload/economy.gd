@@ -12,6 +12,7 @@ var _shop: Dictionary = {}
 
 func _ready() -> void:
 	register_shop_item("house", 5, "House", "Shelters 4 villagers at night")
+	register_shop_item("church", 50, "Church", "Blues heal / 8 shelter at night")
 
 
 func register_shop_item(id: String, cost: int, display_name: String, desc: String) -> void:

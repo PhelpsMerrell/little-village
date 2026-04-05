@@ -1,6 +1,6 @@
 extends Node
 ## Central registry for all villager color types.
-## Add new color types here — the rest of the system reads from this.
+## Add new color types here -- the rest of the system reads from this.
 
 var _color_types: Dictionary = {}
 
@@ -61,14 +61,37 @@ func _register_defaults() -> void:
 		"negates_influences": [],
 	})
 
+	# Colorless villager: fast shifter, joins whatever color group it shifts to.
+	# Shifts into the cycle: colorless -> red -> yellow -> blue -> red ...
+	# Low HP, medium speed, small. Finding a group = free numbers.
 	register({
 		"id": "colorless",
+		"display_color": Color(0.75, 0.75, 0.75),
+		"radius": 20.0,
+		"health": 25,
+		"movement_speed": 7.0,
+		"shifts_to": "red",
+		"influence_targets": [],
+		"on_shift_spawn_count": 1,
+		"influence_delivery": "standard",
+		"influence_rate": 0.0,
+		"stacking_bonus": 0.0,
+		"can_move": true,
+		"special_abilities": [],
+		"negates_influences": [],
+		"fast_shifter": true,  # shifts at 3x speed
+	})
+
+	# Magic Orb: stationary influence catalyst. Not a villager.
+	# Accelerates all nearby villagers' shifts. Cannot move, cannot shift.
+	register({
+		"id": "magic_orb",
 		"display_color": Color(0.82, 0.82, 0.82),
 		"radius": 20.0,
 		"health": 100,
 		"movement_speed": 0.0,
 		"shifts_to": "",
-		"influence_targets": ["red", "yellow", "blue"],
+		"influence_targets": ["red", "yellow", "blue", "colorless"],
 		"on_shift_spawn_count": 1,
 		"influence_delivery": "standard",
 		"influence_rate": 2.0,

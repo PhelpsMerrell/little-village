@@ -1,178 +1,139 @@
-# Little Village — Game State Document
-# Living reference for all game systems, constants, and mechanics.
-# Last updated: Session 1 — initial comprehensive build.
+# Little Village -- Game State Document
 
 ## Project Structure
 ```
 autoload/
-  color_registry.gd        — Color type definitions (red/yellow/blue/colorless)
-  influence_manager.gd      — Range-based proximity influence with attractor system
-  game_clock.gd             — Day/night cycle (20min day, 10min night)
-  economy.gd                — Stone + fish currency, shop catalog
+  color_registry.gd        -- Color type definitions (red/yellow/blue/colorless/magic_orb)
+  influence_manager.gd      -- Range + level-aware influence, 3s decay grace, fast_shifter
+  game_clock.gd             -- Day/night cycle (20min/10min), 8-phase lunar cycle
+  economy.gd                -- Stone + fish currency, shop
+  night_events.gd           -- Moon-phase-aware night event system
+  event_feed.gd             -- Global event log, time-of-day + moon messages
+  save_manager.gd           -- Save/load to user://savegame.json
 scenes/
-  main.gd + main.tscn       — 24-room (6x4) map, all game system orchestration
-  camera.gd                 — Pan (WASD/arrows/right-click), zoom (Q/E/scroll), F11 fullscreen
-  villager.gd + villager.tscn — Villager with AI brain, levels, carrying, shooting
-  enemy.gd + enemy.tscn     — Enemy with levels, stun, duplication, merging
-  room.gd + room.tscn       — Drag-drop room (@export room_id, room_size, room_color)
-  wall_segment.gd + .tscn   — Click-to-toggle walls between rooms
-  collectable.gd + .tscn    — Stone pickup (yellow-only)
-  fish_spot.gd + .tscn      — Fish pickup (blue-only, animated bobbing)
-  bank.gd + .tscn           — Yellow deposits stone here
-  fishing_hut.gd + .tscn    — Blue deposits fish here
-  home.gd + .tscn           — Shelters 4 villagers at night
-  obstacles/
-    water_obstacle.gd + .tscn           — Blocks non-swimmers
-    breakable_wall_obstacle.gd + .tscn  — Reds break on contact
-    river_obstacle.gd + .tscn           — Multi-segment S-curve river
+  title_screen.gd + .tscn   -- New Game / Continue menu
+  main.gd + main.tscn       -- 24-room orchestrator, all systems
+  camera.gd                 -- Pan/zoom/fullscreen
+  villager.gd + villager.tscn -- AI brain, levels, ranged combat, carrying, death anim
+  enemy.gd + enemy.tscn     -- Standard enemy (L1-L3, dupe, merge, stun)
+  demon.gd + demon.tscn     -- Night enemy: only L3 red can kill (will become werewolf)
+  zombie.gd + zombie.tscn   -- Night enemy: converts villagers on touch
+  room.gd, wall_segment.gd, collectable.gd, fish_spot.gd
+  bank.gd, fishing_hut.gd, home.gd, church.gd, hud.gd
+  obstacles/ -- water, breakable_wall, river
 docs/
-  GAME_STATE.md             — This file
-  MAP_GENERATION_GUIDELINES.md — Procedural map gen rules
+  GAME_STATE.md, MAP_GENERATION_GUIDELINES.md
 ```
 
 ---
 
-## Color Shift Cycle
-Red → Yellow (spawns 2) → Blue → Red.
-Colorless accelerates all others at 2x rate, never shifts itself.
+## Moon Phase System
+8-day lunar cycle tracked in game_clock.gd. Each game day advances one phase.
 
-### Influence System
-- **Range-based**: max range = influencer_radius × 7.5
-  - Red (r=28): 210px range
-  - Yellow (r=22): 165px range
-  - Blue (r=36): 270px range
-  - Colorless (r=20): 150px range
-- **Proximity falloff**: 1.0× at touch → 0.15× at max range edge (linear)
-- **Level-aware**: influencer level must be >= target level to affect them
-  - L1 influencer affects L1 targets only
-  - L2 influencer affects L1 and L2 targets
-  - L3 influencer affects all targets
-  - Exception: Yellow L3 is always influenceable at 1.0×
-- **Attraction**: influenced villagers orbit the influencer at 40-80% of range
-- **Speed**: BASE_SHIFT_SPEED = 18.0, DECAY_MULTIPLIER = 1.3
-- **Yellow delivery**: single_target at 0.6× rate, no stacking
-- **Standard delivery**: stacks with +0.1× per extra influencer in range
+| Phase | Day | Night Event |
+|-------|-----|-------------|
+| New Moon | 1 | Zombie Plague (forced) |
+| Waxing Crescent | 2 | Random |
+| First Quarter | 3 | Random |
+| Waxing Gibbous | 4 | Random |
+| Full Moon | 5 | Demon Hunt (forced) |
+| Waning Gibbous | 6 | Random |
+| Last Quarter | 7 | Random |
+| Waning Crescent | 8 | Random |
 
-### On Shift
-- Villager becomes L1 of the new color (always resets to L1)
-- Red → Yellow spawns 2 yellows (original + 1 new)
-- All other shifts spawn 1
+Moon phase name shown in HUD time bar. Dusk warnings reference the upcoming moon.
+Full moon: "A full moon rises tonight... beware."
+New moon: "Darkness gathers under the new moon."
+
+---
+
+## Save System (save_manager.gd)
+- **F5**: Quick save during gameplay
+- **Escape**: Save and return to title screen
+- Saves to `user://savegame.json`
+- **Data saved**: clock state (elapsed, day_count), economy (stone, fish), wall open/closed states, all villagers (position, color, level, HP, shift meter, kill count, satiation, carrying), all enemies (position, level, HP, dupe meter), all collectables + fish spots (positions), all buildings (type + position)
+- Title screen shows "Continue" only when a save exists
+- "New Game" deletes existing save
+
+---
+
+## Influence System
+- **Range**: radius x 15.0 (Red=420px, Yellow=330px, Blue=540px, Colorless=300px)
+- **Falloff**: 1.0x at touch -> 0.15x at max range (linear)
+- **Level-aware**: source level must be >= target level
+- **Fast shifters**: colorless villagers receive influence at 3x speed
+- **Inside buildings**: influence still runs on co-sheltered villagers
 
 ---
 
 ## Villager Stats
-| Color     | HP  | Speed | Radius | Abilities               |
-|-----------|-----|-------|--------|--------------------------|
-| Yellow    | 15  | 10    | 22     | Collect stone            |
-| Red       | 50  | 6     | 28     | Ranged attack, break walls |
-| Blue      | 200 | 3     | 36     | Collect fish, swim       |
-| Colorless | 100 | 0     | 20     | Accelerate influence 2×  |
+| Color     | HP  | Speed  | L2 Speed | Radius | Role                         |
+|-----------|-----|--------|----------|--------|------------------------------|
+| Yellow    | 15  | 80px/s | 112px/s  | 22     | Gatherer (stone -> bank)     |
+| Red       | 50  | 48px/s | 67px/s   | 28     | Fighter (ranged, needs fish) |
+| Blue      | 200 | 24px/s | 34px/s   | 36     | Tank + fisher (fish -> hut)  |
+| Colorless | 25  | 56px/s | 78px/s   | 20     | Fast shifter (joins groups)  |
 
-Speed is multiplied by SPEED_SCALE (8.0) for actual px/s.
-
----
-
-## Leveling System
-| Level | Shape    | Influence Resistance           | Health   | On Shift      |
-|-------|----------|--------------------------------|----------|---------------|
-| L1    | Circle   | Affected by L1+ influencers    | Base     | → L1 new color |
-| L2    | Square   | Affected by L2+ influencers only | Base   | → L1 new color |
-| L3    | Triangle | Immune (except yellow L3)      | 2× base  | → L1 new color |
-
-### Level-up Methods
-- **Red**: Kill-based. 10 kills → L2, 30 total kills → L3
-- **Blue**: Merge. 3 same-level blues within 120px → 1 next-level blue (consumes 2)
-- **Yellow**: Pair bond. 2 same-level yellows within 100px for 8 seconds → both level up
+**Magic Orb** (color_type = "magic_orb"): Stationary catalyst. Influences all colors at 2x rate. Cannot move or shift. Drag-only.
 
 ---
 
-## Combat System
-
-### Red Ranged Attack
-- Reds SHOOT enemies (not touch-kill)
-- Shoot range: 200px
-- Shoot cooldown: 1.0s
-- Damage per level: L1=50, L2=75, L3=150
-- Visual: red line from shooter to target, fades over 0.2s
-
-### Enemy Attack
-- Enemies touch villagers to attack (not ranged)
-- vs Yellow: instant kill (15hp → 0)
-- vs Blue: 40 damage + enemy is STUNNED for 2.5s
-- vs Red: immune (reds damage enemies, not the other way)
-
-### Enemy Health
-- L1: 50hp (circle, r=28) — dies to any single red shot
-- L2: 50hp (square, r=36) — dies to any single red shot
-- L3: 150hp (triangle, r=45) — requires multiple red hits
+## Colorless Villager
+- Shifts into red at 3x normal speed. Then follows cycle: red -> yellow -> blue -> red.
+- No job. Wanders and shifts. Flees enemies like yellows.
+- Finding colorless = free recruits. Expose to any influence and they convert fast.
+- Low HP (25), medium speed. If they shift red->yellow they duplicate.
 
 ---
 
-## Enemy Behavior
-- **Duplication** (L1 only): when 2+ L1s within radius×5 (140px), dupe meter fills. Diminishing returns via 0.9^log2(count/2)
-- **Merging**: 4 same-level enemies within 100px → 1 next-level
-- **Stun**: after hitting a blue, enemy is stunned 2.5s (X eyes, stars, can't move/attack)
+## Level 2 Speed Boost
+All L2 villagers move 40% faster. L3 returns to base speed but has 2x HP.
 
 ---
 
-## AI Brain — Priority System
-Each villager evaluates priorities top-down each frame:
+## Red Hunger (Per-Villager Satiation)
+- Each red has an individual satiation timer.
+- L1: 1 fish lasts 1 day (1200s). L2: 2 days. L3: 3 days.
+- No fish: starves at 2 HP/s, dies at 0.
 
-### Priority 1: DANGER (enemy within awareness range ~300px)
-- **Yellow**: flee from nearest enemy, move toward nearest blue for protection
-- **Blue**: move to front line — position between enemies and allies, face enemies
-- **Red**: get behind nearest blue (opposite side from enemy), shoot enemies in range
+---
 
-### Priority 2: JOB (resource work)
-- **Yellow**: find nearest uncollected stone → walk to it → pick up → walk to bank → deposit
-- **Blue**: find nearest uncollected fish → walk to it → pick up → walk to fishing hut → deposit
-- **Red**: patrol (wander with purpose, no specific job yet)
+## Buildings
+| Building | Cost | Capacity | Special |
+|----------|------|----------|---------|
+| Home | 5 stone | 4 night | Any color |
+| Church | 50 stone | 8 night | Blues heal 10 HP/s during day |
 
-### Priority 3: INFLUENCE
-- If being influenced, orbit the attractor (existing system)
+---
 
-### Priority 4: IDLE
-- Random wander within room bounds
+## Night Event System
+Moon-phase-aware. Full moon forces demon_hunt. New moon forces zombie_plague. Other phases roll randomly from weighted pool (demon_hunt=1.0, zombie_plague=1.0, quiet_night=0.5).
+
+---
+
+## Event Feed
+- HUD right side, last 5 messages. Click to expand/scroll.
+- Moon-aware dusk warnings. Game events for deaths, shifts, levels, enemies, buildings.
 
 ---
 
 ## Economy
-
-### Resources
-- **Stone**: Yellows pick up → carry to Bank → deposit. Used to buy buildings.
-- **Fish**: Blues pick up → carry to Fishing Hut → deposit. Used to feed reds.
-
-### Red Hunger
-- Every 60 seconds, each red consumes 1 fish from Economy.fish
-- If no fish available: red loses 2 HP/s (starvation), shows "HUNGRY" + pulse
-- Starving reds die when health reaches 0
-
-### Shop (B key)
-- House: 5 stone — shelters 4 villagers at night
+- **Stone**: Yellow -> bank. Buys: House (5), Church (50)
+- **Fish**: Blue -> hut. Feeds reds (1 fish per 1/2/3 days by level)
 
 ---
 
-## Day/Night Cycle
-- Day: 20 minutes, Night: 10 minutes (GameClock autoload)
-- At night: villagers near homes (80px) auto-shelter (hidden, paused)
-- At dawn: all sheltered villagers released
+## Leveling
+| Color | Method | L2 | L3 |
+|-------|--------|----|----|
+| Red | Kills | 10 kills | 30 total |
+| Blue | Merge | 3 same-level nearby | 3 L2s merge |
+| Yellow | Pair | 2 same-level, 8s together | 2 L2s pair |
+
+On shift: resets to L1. HP% preserved. L2 = +40% speed. L3 = 2x HP.
 
 ---
 
-## Map Layout (6×4, 24 rooms)
-```
-Row 0: Red Start     | Yellow+Bank   | Water Crossing | Enemy Den  | Passage      | Stone Field(10)
-Row 1: Blue Start    | Colorless     | Barricade      | Passage    | Enemy Den    | Flooded Quarry(8)
-Row 2: Passage       | Stone Quarry(20)| Walled Quarry(10)| River Delta+Hut | Enemy Den | Stone Field(10)
-Row 3: Shallows      | Enemy Den     | Stone Mine(10) | Fortification| Passage     | Enemy Den
-```
-
-68 stones, 15 fish, 5 solo enemies, 3 breakable walls, 3 water crossings, 1 bank, 1 fishing hut.
-
----
-
-## Known GDScript Patterns
-- **Type inference bug**: `var x := untyped_array_element.property` fails. Always use `var x: Type = ...`
-- **GDScript uses `sin()` not `sinf()`** but `minf()`/`maxf()` DO exist
-- **Control nodes eat mouse input**: Set `mouse_filter = 2` (IGNORE) on overlapping UI
-- **Signal params**: Untyped in connections — don't use `:=` inference on signal callback params
+## Controls
+WASD/Arrows: Pan | Q/E/Scroll: Zoom | F11: Fullscreen | B: Shop | F5: Save | Esc: Save + Menu
+Click resource then click matching villager: Waypoint assignment
