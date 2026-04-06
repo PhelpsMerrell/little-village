@@ -20,6 +20,7 @@ func save_game(main: Node) -> bool:
 		"collectables": _save_collectables(main),
 		"fish_spots": _save_fish_spots(main),
 		"buildings": _save_buildings(main),
+		"fog_explored": FogOfWar.get_save_data(),
 	}
 
 	var json_str: String = JSON.stringify(data, "\t")
@@ -70,6 +71,9 @@ func load_game(main: Node) -> bool:
 	_load_collectables(main, data.get("collectables", []))
 	_load_fish_spots(main, data.get("fish_spots", []))
 	_load_buildings(main, data.get("buildings", []))
+
+	# Restore fog
+	FogOfWar.load_save_data(data.get("fog_explored", []))
 
 	# Re-collect everything
 	main._collect_all()

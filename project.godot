@@ -24,6 +24,7 @@ Economy="*res://autoload/economy.gd"
 NightEvents="*res://autoload/night_events.gd"
 EventFeed="*res://autoload/event_feed.gd"
 SaveManager="*res://autoload/save_manager.gd"
+FogOfWar="*res://autoload/fog_of_war.gd"
 
 [display]
 

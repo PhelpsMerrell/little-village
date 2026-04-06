@@ -75,6 +75,10 @@ var has_waypoint: bool = false
 var brain_church_pos: Vector2 = Vector2.ZERO
 var brain_has_church: bool = false
 
+## Colorless attraction: main.gd sets when a controlled villager is nearby
+var colorless_attract_pos: Vector2 = Vector2.ZERO
+var has_attract_target: bool = false
+
 var shoot_target_pos: Vector2 = Vector2.ZERO
 var shoot_target_enemy: Node = null
 var _shoot_cooldown: float = 0.0
@@ -236,6 +240,11 @@ func _check_job() -> bool:
 			elif has_waypoint: _brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
 			elif brain_has_resource: _brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
 		"red": pass
+		"colorless":
+			if has_attract_target:
+				_brain_state = "attract"
+				_set_target(colorless_attract_pos)
+				return true
 	return false
 
 func _check_influence() -> bool:
@@ -278,7 +287,7 @@ func _do_movement(delta: float) -> void:
 	else:
 		var new_pos: Vector2 = global_position + to_target.normalized() * step
 		# Only clamp to room if not cross-room navigating (waypoint/church/carry)
-		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross"]
+		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract"]
 		if room_bounds.has_area() and not cross_room:
 			var m := radius + 4.0
 			new_pos.x = clampf(new_pos.x, room_bounds.position.x + m, room_bounds.end.x - m)
