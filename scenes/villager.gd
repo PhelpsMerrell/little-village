@@ -476,6 +476,7 @@ func _find_nearest_color(target_color: String) -> Node:
 func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
 	if _dying: return
 	if not FactionManager.is_local_faction(faction_id): return
+	if Input.is_key_pressed(KEY_SHIFT): return  # Shift = selection mode, suppress drag
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if is_puppet:
 			# Client: start local drag + notify host

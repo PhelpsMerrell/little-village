@@ -60,7 +60,7 @@ assets/
 | Enemies | 5 | 3 standard levels + demon + zombie |
 | Buildings | 3 | Home, bank, fishing hut |
 | Resources | 4 | Stone, fish, + carry icons |
-| Obstacles | 3 | Water, breakable wall, river |
+| Obstacles | 4 | Water, breakable wall, river, door barricade |
 | UI | 2 | Optional HUD/shop backgrounds |
 | Rooms | 5 | Optional room backgrounds |
 | **Total** | **~32** | Only first 22 are essential |

@@ -79,17 +79,16 @@ func generate(containers: Dictionary, scenes: Dictionary, map_seed: int = -1, fa
 	_faction_count = faction_count
 	_faction_override_rooms.clear()
 
-	# In multi-faction mode, mark rooms that get overridden with faction-specific spawns
-	if _faction_count > 1:
-		for i in mini(_faction_count, FACTION_STARTS.size()):
-			_faction_override_rooms.append(FACTION_STARTS[i]["home_room"])
-			_faction_override_rooms.append(FACTION_STARTS[i]["bank_room"])
+	# Always override faction start rooms so SPAWN_RULES doesn't duplicate
+	# villagers/buildings there — applies to solo (faction 0) too.
+	for i in mini(maxi(_faction_count, 1), FACTION_STARTS.size()):
+		_faction_override_rooms.append(FACTION_STARTS[i]["home_room"])
+		_faction_override_rooms.append(FACTION_STARTS[i]["bank_room"])
 
 	_generate_rooms(containers["rooms"], scenes["room"])
 	_generate_walls(containers["walls"], scenes["wall"])
 	_generate_entities(containers, scenes)
-	if _faction_count > 1:
-		_generate_faction_starts(containers, scenes)
+	_generate_faction_starts(containers, scenes)
 
 
 static func room_pixel_pos(col: int, row: int) -> Vector2:
@@ -196,7 +195,7 @@ func _generate_walls(container: Node2D, wall_scene: PackedScene) -> void:
 		door.room_b_id = wp["b"]
 		door.start_pos = door_start
 		door.end_pos = door_end
-		door.is_open = true
+		door.is_open = false
 		door.is_door = true
 		container.add_child(door)
 
@@ -224,8 +223,8 @@ func _generate_entities(containers: Dictionary, scenes: Dictionary) -> void:
 			var rtype: String = str(rule["type"])
 			var count: int = int(rule.get("count", 1))
 
-			# In multi-faction mode, skip villager/building spawns in faction home/bank rooms
-			if _faction_count > 1 and rid in _faction_override_rooms:
+			# Skip villager/building spawns in faction start rooms (solo and multi).
+			if rid in _faction_override_rooms:
 				if rtype in ["villager", "magic_orb", "bank", "fishing_hut"]:
 					continue
 

@@ -64,10 +64,12 @@ const STRIDE = ROOM_SIZE + GAP  # 1358
 # - River (multi-segment): S-curve using river_obstacle.tscn segments array
 
 ## Wall Connectivity
-# - Every adjacent pair of rooms gets a wall segment
-# - All walls start closed
-# - Player must click to open them
-# - Consider pre-opening some walls in easy mode for less tedium
+# - Every adjacent pair of rooms gets wall segments + a central door
+# - All doors start CLOSED (barricaded)
+# - Red villagers auto-break doors when within range
+# - Players can also command reds to break specific doors
+# - Solid wall segments on either side of doors cannot be broken
+# - Consider pre-opening starting room doors in easy mode
 
 ## Seed-Based Generation Algorithm (future)
 # 1. Create COLS x ROWS grid

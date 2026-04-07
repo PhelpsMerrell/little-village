@@ -410,6 +410,7 @@ func _process(delta: float) -> void:
 	for w in walls:
 		wall_data.append({"room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": w.is_open})
 
+	_process_red_door_breaking()
 	InfluenceManager.process_influence(room_villagers, wall_data, delta)
 	RoomOwnership.process_ownership(room_villagers, room_enemies, delta)
 	_update_hud()
@@ -423,6 +424,21 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Options menu eats all input when open
 	if _options_menu and _options_menu.visible:
+		return
+
+	# Shift-hover selection mode: hovering over villagers auto-selects them
+	if Input.is_key_pressed(KEY_SHIFT) and event is InputEventMouseMotion:
+		var hover_pos: Vector2 = get_global_mouse_position()
+		for v in villagers:
+			if not is_instance_valid(v) or not v.visible:
+				continue
+			if v.faction_id != _player.faction_id:
+				continue
+			if v in _player.selected_villagers:
+				continue
+			if hover_pos.distance_to(v.global_position) < float(v.radius) + 10.0:
+				_player.select_villager(v, true)
+				_hud.set_command_menu_visible(true)
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -480,6 +496,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_hud._pending_command = "move"
 			get_viewport().set_input_as_handled()
 			return
+		elif event.is_action_pressed("cmd_break_door") and _player.has_selection():
+			_hud._pending_command = "break_door"
+			get_viewport().set_input_as_handled()
+			return
 
 	if not (event is InputEventMouseButton and event.pressed):
 		return
@@ -514,6 +534,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Pending move command from HUD menu
 	if _hud.get_pending_command() == "move" and _player.has_selection():
 		_player.command_move_to(click_pos)
+		_hud.clear_pending_command()
+		get_viewport().set_input_as_handled()
+		return
+
+	# Pending break_door command from HUD menu
+	if _hud.get_pending_command() == "break_door" and _player.has_selection():
+		var best_door: Node = null
+		var best_d: float = 200.0  # max click distance to a door
+		for w in walls:
+			if not w.is_door or w.is_open:
+				continue
+			var d: float = click_pos.distance_to(w.get_midpoint())
+			if d < best_d:
+				best_d = d
+				best_door = w
+		if best_door:
+			_player.command_break_door(best_door.get_midpoint())
+		else:
+			EventFeed.push("No closed door nearby.", Color(0.7, 0.5, 0.3))
 		_hud.clear_pending_command()
 		get_viewport().set_input_as_handled()
 		return
@@ -736,6 +775,13 @@ func _apply_net_command(cmd: Dictionary) -> void:
 				if v:
 					cmd_villagers.append(v)
 			_apply_house_command(cmd_villagers)
+		"break_door":
+			var target: Vector2 = Vector2(cmd.get("tx", 0.0), cmd.get("ty", 0.0))
+			for nid in net_ids:
+				var v: Node = _find_villager_by_net_id(int(nid))
+				if v and str(v.color_type) == "red":
+					v.command_move_to(target)
+					v.break_door_target = target
 		"build_place":
 			var item_id: String = cmd.get("item_id", "")
 			var bpos := Vector2(float(cmd.get("px", 0.0)), float(cmd.get("py", 0.0)))
@@ -970,6 +1016,28 @@ func _update_obstacles() -> void:
 				for child in room.get_children():
 					if child.has_method("check_break"):
 						child.check_break(room_villagers.get(v.current_room_id, []))
+
+
+func _process_red_door_breaking() -> void:
+	## Reds automatically break closed doors when within awareness range.
+	## Also handles break_door_target from player command.
+	for v in villagers:
+		if str(v.color_type) != "red":
+			continue
+		if not v.visible:
+			continue
+		for w in walls:
+			if not w.is_door or w.is_open:
+				continue
+			var mid: Vector2 = w.get_midpoint()
+			var dist: float = v.global_position.distance_to(mid)
+			if dist < w.BREAK_RADIUS + float(v.radius):
+				w.break_door()
+				EventFeed.push("A red villager broke open a door!", Color(0.9, 0.5, 0.3))
+				# Clear break_door_target if this was the target
+				if v.break_door_target != Vector2.ZERO and v.break_door_target.distance_to(mid) < 80.0:
+					v.break_door_target = Vector2.ZERO
+					v.command_release()
 
 
 func _process_stone_pickups() -> void:
@@ -1969,6 +2037,11 @@ func _sync_cursor(delta: float) -> void:
 
 
 func _draw() -> void:
+	# Selection mode indicator
+	if Input.is_key_pressed(KEY_SHIFT):
+		var m: Vector2 = get_local_mouse_position()
+		draw_arc(m, 20.0, 0.0, TAU, 16, Color(0.3, 0.9, 1.0, 0.5), 2.0, true)
+
 	# Placement preview
 	if _placing_item != "":
 		var m: Vector2 = get_local_mouse_position()

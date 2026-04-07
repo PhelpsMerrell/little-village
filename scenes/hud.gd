@@ -28,11 +28,11 @@ var _cmd_menu_open: bool = false
 var _cmd_hover: String = ""
 var _pending_command: String = ""
 const CMD_BUTTONS := [
-	{"id": "move", "label": "Move", "color": Color(0.3, 0.8, 0.4)},
-	{"id": "hold", "label": "Hold", "color": Color(1.0, 0.8, 0.2)},
-	{"id": "house", "label": "House", "color": Color(0.7, 0.5, 0.3)},
-	{"id": "break_door", "label": "Break Door", "color": Color(0.9, 0.4, 0.2)},
-	{"id": "release", "label": "Release", "color": Color(0.6, 0.6, 0.6)},
+	{"id": "move", "label": "Move", "color": Color(0.3, 0.8, 0.4), "requires": ""},
+	{"id": "hold", "label": "Hold", "color": Color(1.0, 0.8, 0.2), "requires": ""},
+	{"id": "house", "label": "House", "color": Color(0.7, 0.5, 0.3), "requires": ""},
+	{"id": "break_door", "label": "Break Door", "color": Color(0.9, 0.4, 0.2), "requires": "red"},
+	{"id": "release", "label": "Release", "color": Color(0.6, 0.6, 0.6), "requires": ""},
 ]
 
 ## Building menu state
@@ -90,6 +90,25 @@ func get_pending_command() -> String:
 
 func clear_pending_command() -> void:
 	_pending_command = ""
+
+
+func _get_filtered_commands() -> Array:
+	## Returns only commands shared by ALL selected villager types.
+	if selected_villager_info.is_empty():
+		return []
+	var types: Dictionary = {}
+	for info in selected_villager_info:
+		types[info.get("color_type", "")] = true
+	var result: Array = []
+	for btn in CMD_BUTTONS:
+		var req: String = btn.get("requires", "")
+		if req == "":
+			result.append(btn)
+		else:
+			# Only include if ALL selected villagers match the required type
+			if types.size() == 1 and types.has(req):
+				result.append(btn)
+	return result
 
 
 func _process(_delta: float) -> void:
@@ -191,12 +210,13 @@ func _get_feed_rect(vp_size: Vector2) -> Rect2:
 
 
 func _get_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
+	var filtered := _get_filtered_commands()
 	var bx: float = vp_size.x - 150.0
 	var by: float = vp_size.y - 222.0
-	for i in CMD_BUTTONS.size():
+	for i in filtered.size():
 		var iy: float = by + i * 42.0
 		if Rect2(bx, iy, 120, 36).has_point(pos):
-			return CMD_BUTTONS[i]["id"]
+			return filtered[i]["id"]
 	return ""
 
 
@@ -263,8 +283,8 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(275, panel_y + 150),
 		"Fish: %d" % my_fish, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.4, 0.65, 0.8))
 
-	draw_string(ThemeDB.fallback_font, Vector2(16, panel_y + 200),
-		"Tab: Scoreboard", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.4, 0.45))
+	draw_string(ThemeDB.fallback_font, Vector2(16, panel_y + 186),
+		"Shift: Hover-select  |  Tab: Scoreboard", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.4, 0.45))
 
 	# Pending command
 	if _pending_command != "":
@@ -294,6 +314,7 @@ func _draw() -> void:
 
 func _draw_selection_panel(vp_size: Vector2) -> void:
 	## Side-by-side: villager info on left, commands on right, bottom-right corner
+	var filtered := _get_filtered_commands()
 	var panel_w: float = 380.0
 	var panel_h: float = 240.0
 	var px: float = vp_size.x - panel_w - 10.0
@@ -302,39 +323,47 @@ func _draw_selection_panel(vp_size: Vector2) -> void:
 	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.06, 0.06, 0.08, 0.88))
 	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.4, 0.4, 0.4, 0.3), false, 1.0)
 
-	# Left side: villager info (220px wide)
+	# Left side: selection summary
 	var info_x: float = px + 10.0
-	draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 18), "SELECTED",
+	var total: int = selected_villager_info.size()
+	draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 18), "SELECTED (%d)" % total,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
 
-	var max_show: int = mini(selected_villager_info.size(), 4)
-	for i in max_show:
-		var info: Dictionary = selected_villager_info[i]
-		var iy: float = py + 28.0 + i * 48.0
-		var col: Color = info.get("display_color", Color.WHITE)
-		draw_circle(Vector2(info_x + 8, iy + 14), 6.0, col)
-		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, iy + 18),
-			str(info.get("name", "Villager")), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
-		var hp: int = int(info.get("health", 0))
-		var max_hp: int = int(info.get("max_health", 1))
-		var shift: int = int(info.get("shift", 0))
-		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, iy + 34),
-			"HP:%d/%d  Shift:%d%%" % [hp, max_hp, shift], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.55, 0.55, 0.55))
-		var bar_w: float = 140.0
-		var hp_ratio: float = float(hp) / float(max_hp) if max_hp > 0 else 1.0
-		draw_rect(Rect2(info_x + 20, iy + 38, bar_w, 3), Color(0.2, 0.2, 0.2, 0.6))
-		draw_rect(Rect2(info_x + 20, iy + 38, bar_w * hp_ratio, 3), Color(0.3, 0.8, 0.35) if hp_ratio > 0.5 else Color(0.85, 0.25, 0.2))
+	# Per-type counts
+	var type_counts: Dictionary = {}
+	for info in selected_villager_info:
+		var ct: String = info.get("color_type", "unknown")
+		type_counts[ct] = type_counts.get(ct, 0) + 1
+	var ty: float = py + 36.0
+	for ct in type_counts:
+		var def: Dictionary = ColorRegistry.get_def(ct)
+		var col: Color = def.get("display_color", Color.WHITE)
+		draw_circle(Vector2(info_x + 8, ty + 6), 6.0, col)
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, ty + 12),
+			"%s: %d" % [ct.capitalize(), type_counts[ct]],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
+		ty += 28.0
 
-	if selected_villager_info.size() > 4:
-		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, py + panel_h - 14),
-			"+%d more" % (selected_villager_info.size() - 4), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.5, 0.5, 0.5))
+	# Show individual villager details if small selection
+	if total <= 4:
+		ty += 4.0
+		for info in selected_villager_info:
+			if ty > py + panel_h - 20.0:
+				break
+			var col: Color = info.get("display_color", Color.WHITE)
+			var hp: int = int(info.get("health", 0))
+			var max_hp: int = int(info.get("max_health", 1))
+			draw_string(ThemeDB.fallback_font, Vector2(info_x + 4, ty + 12),
+				"%s HP:%d/%d" % [str(info.get("name", "")), hp, max_hp],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col.lightened(0.3))
+			ty += 22.0
 
-	# Right side: commands (140px wide)
+	# Right side: filtered commands
 	var cmd_x: float = px + panel_w - 140.0
 	draw_string(ThemeDB.fallback_font, Vector2(cmd_x, py + 18), "COMMANDS",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
-	for i in CMD_BUTTONS.size():
-		var btn: Dictionary = CMD_BUTTONS[i]
+	for i in filtered.size():
+		var btn: Dictionary = filtered[i]
 		var iy: float = py + 28.0 + i * 42.0
 		var hovered: bool = (_cmd_hover == btn["id"])
 		var bg: Color = btn["color"].darkened(0.2 if not hovered else 0.0)
