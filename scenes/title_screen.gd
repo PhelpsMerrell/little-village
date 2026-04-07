@@ -18,8 +18,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var btn: String = _get_button_at(event.position)
 		if btn == "new":
-			SaveManager.delete_save()
-			get_tree().change_scene_to_file("res://scenes/main.tscn")
+			get_tree().change_scene_to_file("res://scenes/lobby.tscn")
 		elif btn == "continue":
 			get_tree().change_scene_to_file("res://scenes/main.tscn")
 

@@ -20,6 +20,9 @@ var max_health: float = HEALTH
 
 # Required interface for main.gd enemy system
 var level: int = 1
+var net_id: int = -1
+var is_puppet: bool = false
+var interp_target: Vector2 = Vector2.ZERO
 var radius: float = RADIUS
 var dupe_meter: float = 0.0
 var enemy_type: String = "demon"
@@ -43,6 +46,11 @@ func is_stunned() -> bool:
 
 func _process(delta: float) -> void:
 	if is_dead: return
+	if is_puppet:
+		if interp_target != Vector2.ZERO:
+			global_position = global_position.lerp(interp_target, clampf(delta * 14.0, 0.0, 1.0))
+		queue_redraw()
+		return
 	var expired: Array = []
 	for key in _hit_cooldowns:
 		_hit_cooldowns[key] -= delta

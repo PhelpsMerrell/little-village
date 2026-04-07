@@ -18,6 +18,8 @@ config/icon="res://icon.svg"
 [autoload]
 
 ColorRegistry="*res://autoload/color_registry.gd"
+GameRNG="*res://autoload/game_rng.gd"
+InputConfig="*res://autoload/input_config.gd"
 InfluenceManager="*res://autoload/influence_manager.gd"
 GameClock="*res://autoload/game_clock.gd"
 Economy="*res://autoload/economy.gd"
@@ -25,6 +27,9 @@ NightEvents="*res://autoload/night_events.gd"
 EventFeed="*res://autoload/event_feed.gd"
 SaveManager="*res://autoload/save_manager.gd"
 FogOfWar="*res://autoload/fog_of_war.gd"
+FactionManager="*res://autoload/faction_manager.gd"
+RoomOwnership="*res://autoload/room_ownership.gd"
+NetworkManager="*res://autoload/network_manager.gd"
 
 [display]
 

@@ -10,6 +10,9 @@ func has_save() -> bool:
 
 
 func save_game(main: Node) -> bool:
+	if NetworkManager.is_online():
+		EventFeed.push("Cannot save during multiplayer.", Color(0.9, 0.5, 0.3))
+		return false
 	var data: Dictionary = {
 		"version": 1,
 		"clock": GameClock.get_save_data(),
@@ -35,6 +38,9 @@ func save_game(main: Node) -> bool:
 
 
 func load_game(main: Node) -> bool:
+	if NetworkManager.is_online():
+		EventFeed.push("Cannot load during multiplayer.", Color(0.9, 0.5, 0.3))
+		return false
 	if not has_save():
 		return false
 	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
@@ -116,6 +122,8 @@ func _save_villagers(main: Node) -> Array:
 			"is_fed": v.is_fed,
 			"satiation_timer": v._satiation_timer,
 			"carrying_resource": str(v.carrying_resource),
+			"faction_id": v.faction_id,
+			"net_id": v.net_id,
 		})
 	return result
 
@@ -130,6 +138,7 @@ func _save_enemies(main: Node) -> Array:
 			"y": e.global_position.y,
 			"health": e.health,
 			"dupe_meter": e.dupe_meter,
+			"net_id": e.net_id,
 		})
 	return result
 
@@ -221,6 +230,8 @@ func _load_villagers(main: Node, data: Array) -> void:
 		v.is_fed = bool(vd.get("is_fed", true))
 		v._satiation_timer = float(vd.get("satiation_timer", 0.0))
 		v.carrying_resource = str(vd.get("carrying_resource", ""))
+		v.faction_id = int(vd.get("faction_id", 0))
+		v.net_id = int(vd.get("net_id", -1))
 		if not v.resource_dropped.is_connected(main._on_villager_dropped_resource):
 			v.resource_dropped.connect(main._on_villager_dropped_resource)
 
@@ -234,6 +245,7 @@ func _load_enemies(main: Node, data: Array) -> void:
 		e.set_level(int(ed.get("level", 1)))
 		e.health = float(ed.get("health", e.max_health))
 		e.dupe_meter = float(ed.get("dupe_meter", 0.0))
+		e.net_id = int(ed.get("net_id", -1))
 
 
 func _load_collectables(main: Node, data: Array) -> void:

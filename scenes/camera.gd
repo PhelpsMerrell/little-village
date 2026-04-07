@@ -18,6 +18,9 @@ var _pan_start := Vector2.ZERO
 var map_bounds: Rect2 = Rect2()
 var explored_bounds: Rect2 = Rect2()
 
+## Home room center for spacebar snap (set by main.gd)
+var home_room_center: Vector2 = Vector2.ZERO
+
 
 func _ready() -> void:
 	make_current()
@@ -43,6 +46,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F11:
 			_toggle_fullscreen()
+		elif event.keycode == KEY_SPACE:
+			_snap_to_home()
 
 
 func _process(delta: float) -> void:
@@ -120,3 +125,9 @@ func _toggle_fullscreen() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+func _snap_to_home() -> void:
+	if home_room_center != Vector2.ZERO:
+		position = home_room_center
+		_clamp_position()

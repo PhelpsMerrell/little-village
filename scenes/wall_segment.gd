@@ -11,6 +11,7 @@ const CLICK_PADDING := 14.0
 @export var end_pos: Vector2 = Vector2.ZERO
 
 var is_open: bool = false
+var is_door: bool = false  ## Permanent opening — always open, can't be toggled
 
 @onready var _area: Area2D = $ClickArea
 @onready var _col: CollisionShape2D = $ClickArea/CollisionShape2D
@@ -33,12 +34,33 @@ func _resize_click_area() -> void:
 
 
 func _on_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
+	if is_door:
+		return  # doors can't be toggled
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if NetworkManager.is_online() and not NetworkManager.is_authority():
+			# Client: request wall toggle from host
+			NetworkManager.send_command({
+				"type": "wall_toggle",
+				"room_a": room_a_id,
+				"room_b": room_b_id,
+				"sx": start_pos.x,
+				"sy": start_pos.y,
+			})
+			return
 		is_open = not is_open
 		queue_redraw()
 
 
 func _draw() -> void:
+	if is_door:
+		# Draw door frame markers at each end of the opening
+		var dir := (end_pos - start_pos).normalized()
+		var perp := Vector2(-dir.y, dir.x) * 6.0
+		var frame_col := Color(0.45, 0.35, 0.2, 0.7)
+		draw_line(start_pos - perp, start_pos + perp, frame_col, 3.0)
+		draw_line(end_pos - perp, end_pos + perp, frame_col, 3.0)
+		return
+
 	if is_open:
 		var dir := (end_pos - start_pos).normalized()
 		var length := start_pos.distance_to(end_pos)

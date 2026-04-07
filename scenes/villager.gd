@@ -27,6 +27,11 @@ const SEPARATION_FORCE := 0.4
 
 @export var color_type: String = "red"
 
+var faction_id: int = 0  ## Which faction owns this villager (0 = local player in solo)
+var net_id: int = -1  ## Unique ID for network command targeting
+var is_puppet: bool = false  ## Client-side puppet: interpolates, no brain
+var interp_target: Vector2 = Vector2.ZERO  ## Target position for puppet interpolation
+
 var level: int = 1
 var shift_meter: float = 0.0
 var _decay_grace_timer: float = 0.0  # 3s grace before shift decay starts
@@ -37,6 +42,14 @@ var radius: float = 22.0
 
 var is_being_influenced: bool = false
 var influence_attractor: Vector2 = Vector2.ZERO
+
+## Player commands — override AI brain when active
+var command_mode: String = "none"  # none, move_to, hold
+var command_target: Vector2 = Vector2.ZERO
+var is_selected: bool = false
+
+## Dynamic shift target for colorless villagers (set by influence_manager)
+var pending_shift_color: String = ""
 
 var kill_count: int = 0
 var is_fed: bool = true
@@ -79,6 +92,9 @@ var brain_has_church: bool = false
 var colorless_attract_pos: Vector2 = Vector2.ZERO
 var has_attract_target: bool = false
 
+## Wall segments for collision (set by main.gd)
+var brain_walls: Array = []  # [{start: Vector2, end: Vector2, is_open: bool}]
+
 var shoot_target_pos: Vector2 = Vector2.ZERO
 var shoot_target_enemy: Node = null
 var _shoot_cooldown: float = 0.0
@@ -94,6 +110,9 @@ var _brain_state: String = "idle"
 
 var _dragging := false
 var _drag_offset := Vector2.ZERO
+var _client_dragging := false  ## Client puppet is being dragged locally
+var _drag_send_timer := 0.0  ## Throttle drag position RPCs
+const DRAG_SEND_INTERVAL := 0.066  ## ~15 updates/sec
 var _dying := false
 var _death_timer := 0.0
 const DEATH_TWITCH_DURATION := 1.2
@@ -112,7 +131,7 @@ func setup(p_color: String, pos: Vector2, p_level: int = 1) -> void:
 	color_type = p_color; position = pos; level = p_level
 	shift_meter = 0.0; _decay_grace_timer = 0.0; kill_count = 0; is_fed = true
 	leveling_meter = 0.0; leveling_partner = null; carrying_resource = ""
-	_sync_definition(); _idle_timer = randf_range(0.3, 1.0)
+	_sync_definition(); _idle_timer = GameRNG.randf_range(0.3, 1.0)
 
 func set_color_type(new_type: String) -> void:
 	var hp_ratio: float = health / max_health if max_health > 0.0 else 1.0
@@ -159,6 +178,18 @@ func _process(delta: float) -> void:
 			return
 		queue_redraw()
 		return
+	if is_puppet:
+		# Client mode: smooth interpolation, no simulation
+		if _client_dragging:
+			# Client is dragging this puppet — use local mouse, skip interp
+			_drag_send_timer += delta
+		else:
+			if interp_target != Vector2.ZERO:
+				global_position = global_position.lerp(interp_target, clampf(delta * 14.0, 0.0, 1.0))
+		_update_label()
+		_shot_flash_timer = maxf(0.0, _shot_flash_timer - delta)
+		queue_redraw()
+		return
 	_update_label()
 	_shoot_cooldown = maxf(0.0, _shoot_cooldown - delta)
 	_shot_flash_timer = maxf(0.0, _shot_flash_timer - delta)
@@ -181,10 +212,40 @@ func _update_label() -> void:
 
 func _evaluate_brain(_delta: float) -> void:
 	shoot_target_enemy = null
+	if _check_command(): return
 	if _check_danger(): return
 	if _check_job(): return
 	if _check_influence(): return
 	_do_idle_brain()
+
+func _check_command() -> bool:
+	match command_mode:
+		"move_to":
+			_brain_state = "command_move"
+			_set_target(command_target)
+			if global_position.distance_to(command_target) < radius + 8.0:
+				command_mode = "none"
+				_arrived = true
+			return true
+		"hold":
+			_brain_state = "command_hold"
+			_arrived = true
+			return true
+	return false
+
+func clear_command() -> void:
+	command_mode = "none"
+	command_target = Vector2.ZERO
+
+func command_move_to(pos: Vector2) -> void:
+	command_mode = "move_to"
+	command_target = pos
+
+func command_hold() -> void:
+	command_mode = "hold"
+
+func command_release() -> void:
+	clear_command()
 
 func _check_danger() -> bool:
 	var nearest_enemy: Node = _find_nearest_enemy()
@@ -251,8 +312,8 @@ func _check_influence() -> bool:
 	if not is_being_influenced: return false
 	_brain_state = "influence"
 	var inf_range: float = radius * 15.0  # match INFLUENCE_RANGE_MULT
-	var angle: float = randf() * TAU
-	var dist: float = randf_range(inf_range * 0.4, inf_range * 0.8)
+	var angle: float = GameRNG.randf() * TAU
+	var dist: float = GameRNG.randf_range(inf_range * 0.4, inf_range * 0.8)
 	_set_target_clamped(influence_attractor + Vector2(cos(angle), sin(angle)) * dist)
 	return true
 
@@ -261,7 +322,7 @@ func _do_idle_brain() -> void:
 	if _arrived:
 		_idle_timer -= get_process_delta_time()
 		if _idle_timer <= 0.0:
-			_idle_timer = randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX); _pick_random_target()
+			_idle_timer = GameRNG.randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX); _pick_random_target()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -282,17 +343,50 @@ func _do_movement(delta: float) -> void:
 	var to_target := _move_target - global_position
 	var dist := to_target.length(); var step := _move_speed * delta
 	if dist <= step or dist < 5.0:
+		# Check wall before snapping to target
+		if _wall_blocks(global_position, _move_target):
+			_arrived = true
+			return
 		global_position = _move_target; _arrived = true
-		_idle_timer = randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
+		_idle_timer = GameRNG.randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
 	else:
 		var new_pos: Vector2 = global_position + to_target.normalized() * step
-		# Only clamp to room if not cross-room navigating (waypoint/church/carry)
-		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract"]
-		if room_bounds.has_area() and not cross_room:
-			var m := radius + 4.0
-			new_pos.x = clampf(new_pos.x, room_bounds.position.x + m, room_bounds.end.x - m)
-			new_pos.y = clampf(new_pos.y, room_bounds.position.y + m, room_bounds.end.y - m)
+		# Only clamp to room if not cross-room navigating
+		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract", "command_move"]
+		if cross_room:
+			# Block at closed walls
+			if _wall_blocks(global_position, new_pos):
+				_arrived = true
+				return
+		else:
+			if room_bounds.has_area():
+				var m := radius + 4.0
+				new_pos.x = clampf(new_pos.x, room_bounds.position.x + m, room_bounds.end.x - m)
+				new_pos.y = clampf(new_pos.y, room_bounds.position.y + m, room_bounds.end.y - m)
 		global_position = new_pos
+
+
+func _wall_blocks(from: Vector2, to: Vector2) -> bool:
+	## Returns true if moving from → to crosses any closed wall segment.
+	for w in brain_walls:
+		if w["is_open"]:
+			continue
+		if _segments_intersect(from, to, w["start"], w["end"]):
+			return true
+	return false
+
+
+static func _segments_intersect(a1: Vector2, a2: Vector2, b1: Vector2, b2: Vector2) -> bool:
+	## Line segment intersection test.
+	var d1: Vector2 = a2 - a1
+	var d2: Vector2 = b2 - b1
+	var cross: float = d1.x * d2.y - d1.y * d2.x
+	if absf(cross) < 0.001:
+		return false  # parallel
+	var diff: Vector2 = b1 - a1
+	var t: float = (diff.x * d2.y - diff.y * d2.x) / cross
+	var u: float = (diff.x * d1.y - diff.y * d1.x) / cross
+	return t >= 0.0 and t <= 1.0 and u >= 0.0 and u <= 1.0
 
 func _apply_separation() -> void:
 	for other in brain_room_villagers:
@@ -308,7 +402,7 @@ func _pick_random_target() -> bool:
 	var inner := Rect2(room_bounds.position + Vector2(m, m), room_bounds.size - Vector2(m * 2.0, m * 2.0))
 	if not inner.has_area(): return false
 	for _attempt in 10:
-		var t := Vector2(randf_range(inner.position.x, inner.end.x), randf_range(inner.position.y, inner.end.y))
+		var t := Vector2(GameRNG.randf_range(inner.position.x, inner.end.x), GameRNG.randf_range(inner.position.y, inner.end.y))
 		if _is_reachable(t): _set_target(t); return true
 	return false
 
@@ -341,19 +435,48 @@ func _find_nearest_color(target_color: String) -> Node:
 
 func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
 	if _dying: return
+	if not FactionManager.is_local_faction(faction_id): return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if is_puppet:
+			# Client: start local drag + notify host
+			_client_dragging = true
+			_dragging = true
+			_drag_offset = global_position - get_global_mouse_position()
+			_drag_send_timer = 0.0
+			z_index = 10
+			NetworkManager.send_command({
+				"type": "drag_start",
+				"net_id": net_id,
+			})
+			return
 		_dragging = true; _drag_offset = global_position - get_global_mouse_position(); z_index = 10
 		_drop_carried_resource()
 
 func _input(event: InputEvent) -> void:
 	if not _dragging: return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		var final_pos := global_position
 		_dragging = false; z_index = 0; _arrived = true; _idle_timer = randf_range(0.5, 1.5)
+		if _client_dragging:
+			_client_dragging = false
+			NetworkManager.send_command({
+				"type": "drag_end",
+				"net_id": net_id,
+				"px": final_pos.x,
+				"py": final_pos.y,
+			})
 	elif event is InputEventMouseMotion:
-		# Drop resource on first actual drag movement (safety net)
-		if carrying_resource != "":
+		if carrying_resource != "" and not is_puppet:
 			_drop_carried_resource()
 		global_position = get_global_mouse_position() + _drag_offset
+		if _client_dragging and _drag_send_timer >= DRAG_SEND_INTERVAL:
+			_drag_send_timer = 0.0
+			NetworkManager.send_command({
+				"type": "drag_move",
+				"net_id": net_id,
+				"px": global_position.x,
+				"py": global_position.y,
+			})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -383,6 +506,16 @@ func _draw() -> void:
 		draw_circle(lt, 4.0, Color(1.0, 0.5, 0.2, a))
 	if carrying_resource == "stone": draw_circle(Vector2(0, -radius - 6), 7.0, Color(0.5, 0.52, 0.48))
 	elif carrying_resource == "fish": draw_circle(Vector2(0, -radius - 6), 7.0, Color(0.3, 0.55, 0.75))
+	# Selection ring
+	if is_selected:
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
+		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 24, Color(1.0, 1.0, 1.0, pulse), 2.5, true)
+	# Command indicator
+	if command_mode == "hold":
+		draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.6, -radius - 28.0), "HOLD", HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color(1.0, 0.8, 0.2, 0.8))
+	elif command_mode == "move_to":
+		var cmd_dir: Vector2 = (command_target - global_position).normalized()
+		draw_line(cmd_dir * (radius + 4.0), cmd_dir * (radius + 16.0), Color(0.2, 1.0, 0.4, 0.6), 2.0)
 	if is_being_influenced and shift_meter > 1.0 and _brain_state == "influence":
 		var dir: Vector2 = (influence_attractor - global_position).normalized()
 		draw_line(dir * (radius + 4.0), dir * (radius + 14.0), Color(1, 1, 1, 0.35), 2.0)

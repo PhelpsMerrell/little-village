@@ -18,6 +18,9 @@ const HEALTH_BY_LEVEL := {1: 50.0, 2: 50.0, 3: 150.0}
 const RED_DAMAGE := {1: 50.0, 2: 75.0, 3: 150.0}
 
 var level: int = 1
+var net_id: int = -1  ## Unique ID for network state sync
+var is_puppet: bool = false  ## Client-side puppet: interpolates, no brain
+var interp_target: Vector2 = Vector2.ZERO
 var radius: float = BASE_RADIUS
 var health: float = 50.0
 var max_health: float = 50.0
@@ -70,6 +73,11 @@ func is_stunned() -> bool:
 
 func _process(delta: float) -> void:
 	if is_dead:
+		return
+	if is_puppet:
+		if interp_target != Vector2.ZERO:
+			global_position = global_position.lerp(interp_target, clampf(delta * 14.0, 0.0, 1.0))
+		queue_redraw()
 		return
 	var expired: Array = []
 	for key in _hit_cooldowns:

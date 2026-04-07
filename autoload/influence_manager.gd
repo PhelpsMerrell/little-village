@@ -77,10 +77,14 @@ func _process_group(villagers: Array, delta: float) -> void:
 	var inf_rate: Dictionary = {}
 	var attractor_sum: Dictionary = {}
 	var attractor_weight: Dictionary = {}
+	var dominant_color: Dictionary = {}  # villager -> strongest influencer color
+	var dominant_strength: Dictionary = {}  # villager -> strength of dominant
 	for v in villagers:
 		inf_rate[v] = 0.0
 		attractor_sum[v] = Vector2.ZERO
 		attractor_weight[v] = 0.0
+		dominant_color[v] = ""
+		dominant_strength[v] = 0.0
 
 	var by_color: Dictionary = {}
 	for v in villagers:
@@ -114,9 +118,13 @@ func _process_group(villagers: Array, delta: float) -> void:
 					if lv_mult <= 0.0: continue
 					var prox: float = _proximity_factor(src.global_position, t.global_position, src_radius)
 					if prox <= 0.0: continue
-					inf_rate[t] += base_rate * prox * lv_mult
+					var contrib: float = base_rate * prox * lv_mult
+					inf_rate[t] += contrib
 					attractor_sum[t] += src.global_position * prox
 					attractor_weight[t] += prox
+					if contrib > dominant_strength.get(t, 0.0):
+						dominant_strength[t] = contrib
+						dominant_color[t] = src_color
 					claimed[t] = true; break
 		else:
 			for t in color_valid_targets:
@@ -133,6 +141,9 @@ func _process_group(villagers: Array, delta: float) -> void:
 						attractor_weight[t] += prox
 				if count > 1: total += stack_bonus * (count - 1)
 				inf_rate[t] += total
+				if total > dominant_strength.get(t, 0.0):
+					dominant_strength[t] = total
+					dominant_color[t] = src_color
 
 	var shift_queue: Array = []
 	for v in villagers:
@@ -141,10 +152,13 @@ func _process_group(villagers: Array, delta: float) -> void:
 		if vdef.get("shifts_to", "").is_empty():
 			v.shift_meter = 0.0; continue
 		if rate > 0.0:
-			# Fast shifters (colorless) receive influence at 3x speed
 			var shift_mult: float = 3.0 if vdef.get("fast_shifter", false) else 1.0
 			v.shift_meter += rate * BASE_SHIFT_SPEED * shift_mult * delta
-			v._decay_grace_timer = DECAY_GRACE_PERIOD   # reset grace on any influence
+			v._decay_grace_timer = DECAY_GRACE_PERIOD
+			# Track dominant influencer color for colorless dynamic shifting
+			var dom: String = dominant_color.get(v, "")
+			if dom != "" and v.color_type == "colorless":
+				v.pending_shift_color = dom
 			var w: float = attractor_weight.get(v, 0.0)
 			if w > 0.0:
 				v.is_being_influenced = true
@@ -170,7 +184,13 @@ func _apply_decay(v: Node, delta: float) -> void:
 func _trigger_shift(v: Node) -> void:
 	var old_color: String = str(v.color_type)
 	var def: Dictionary = ColorRegistry.get_def(old_color)
-	var new_color: String = def.get("shifts_to", "")
+	var new_color: String
+	# Colorless: shift to whatever color was influencing them
+	if old_color == "colorless" and v.pending_shift_color != "":
+		new_color = v.pending_shift_color
+		v.pending_shift_color = ""
+	else:
+		new_color = def.get("shifts_to", "")
 	var spawn_count: int = def.get("on_shift_spawn_count", 1)
 	if new_color.is_empty():
 		v.shift_meter = 0.0; return
