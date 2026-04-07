@@ -4,14 +4,15 @@ extends Node
 
 signal phase_changed(is_daytime: bool)
 
-const DAY_DURATION := 1200.0    # 20 minutes
-const NIGHT_DURATION := 600.0   # 10 minutes
-const CYCLE_DURATION := 1800.0  # total
+const DAY_DURATION := 400.0     # ~6.7 minutes (1/3 of original)
+const NIGHT_DURATION := 200.0   # ~3.3 minutes (1/3 of original)
+const CYCLE_DURATION := 600.0   # total
 const LUNAR_CYCLE_DAYS := 8     # full cycle = 8 game days
 
 var elapsed: float = 0.0
 var day_count: int = 1
 var is_daytime: bool = true
+var is_paused: bool = false
 
 
 ## Moon phases: 0=new, 1=waxing_crescent, 2=first_quarter, 3=waxing_gibbous,
@@ -34,6 +35,8 @@ const MOON_NAMES := [
 
 
 func _process(delta: float) -> void:
+	if is_paused:
+		return
 	elapsed += delta
 	if elapsed >= CYCLE_DURATION:
 		elapsed -= CYCLE_DURATION
@@ -81,6 +84,19 @@ func get_time_string() -> String:
 	else:
 		var remaining: int = int(CYCLE_DURATION - elapsed)
 		return "Night %d  |  %s  |  %d:%02d" % [day_count, moon, remaining / 60, remaining % 60]
+
+
+func advance_phase() -> void:
+	## Skip to next phase boundary (day→night or night→day).
+	if is_daytime:
+		elapsed = DAY_DURATION + 0.01
+	else:
+		elapsed = 0.0
+		day_count += 1
+	var was_day := is_daytime
+	is_daytime = elapsed < DAY_DURATION
+	if was_day != is_daytime:
+		phase_changed.emit(is_daytime)
 
 
 ## For save/load

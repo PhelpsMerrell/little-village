@@ -1,7 +1,6 @@
 extends Node2D
 ## Church — heals blue villagers inside. Shelters 8 any-color at night.
-## Influence still shifts villagers inside buildings.
-## Only blues heal (10 HP/s). Non-blues just shelter.
+## Cannot be moved after placement. Selectable for sell/evict commands.
 
 const CAPACITY := 8
 const HEAL_RATE := 10.0  # HP per second (blues only)
@@ -9,15 +8,14 @@ const INTAKE_RADIUS := 70.0
 const CHURCH_SIZE := Vector2(100, 90)
 
 var sheltered: Array = []  # villager refs currently inside
+var placed_by_faction: int = -1  ## Faction that built this (only they can sell)
+var is_selected: bool = false
 
 @onready var _area: Area2D = $InputArea
 
-var _dragging := false
-var _drag_offset := Vector2.ZERO
-
 
 func _ready() -> void:
-	_area.input_event.connect(_on_area_input)
+	pass
 
 
 func get_sheltered_count() -> int:
@@ -30,7 +28,6 @@ func is_full() -> bool:
 
 
 func shelter_villager(v: Node) -> bool:
-	## Any color can shelter at night. Only blues enter voluntarily during day for healing.
 	if is_full():
 		return false
 	if v in sheltered:
@@ -60,8 +57,12 @@ func release_all() -> void:
 	sheltered.clear()
 
 
+func evict_all() -> void:
+	## Force all sheltered villagers out (player command).
+	release_all()
+
+
 func heal_tick(delta: float) -> void:
-	## Called by main.gd each frame. Only heals blues. Releases blues when full HP.
 	var to_release: Array = []
 	for v in sheltered:
 		if not is_instance_valid(v):
@@ -72,25 +73,6 @@ func heal_tick(delta: float) -> void:
 				to_release.append(v)
 	for v in to_release:
 		release_villager(v)
-
-
-# ── input (drag the church itself) ──────────────────────────────────────────
-
-func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		_dragging = true
-		_drag_offset = global_position - get_global_mouse_position()
-		z_index = 10
-
-
-func _input(event: InputEvent) -> void:
-	if not _dragging:
-		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		_dragging = false
-		z_index = 0
-	elif event is InputEventMouseMotion:
-		global_position = get_global_mouse_position() + _drag_offset
 
 
 # ── drawing ──────────────────────────────────────────────────────────────────
@@ -131,6 +113,11 @@ func _draw() -> void:
 	# Outline
 	draw_rect(Rect2(-hw * 0.85, -hh * 0.2, hw * 1.7, hh * 1.2),
 		Color(0.2, 0.22, 0.35), false, 2.0)
+
+	# Selection ring
+	if is_selected:
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
+		draw_arc(Vector2.ZERO, hw + 10.0, 0.0, TAU, 24, Color(1.0, 0.9, 0.5, pulse), 2.5, true)
 
 	# Healing glow when blues inside
 	var has_blues := false

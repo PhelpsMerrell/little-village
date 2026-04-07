@@ -5,7 +5,7 @@ extends Node2D
 
 enum State { MOVING, PAUSED }
 
-const RADIUS := 32.0
+const RADIUS := 40.0
 const SPEED := 55.0              # faster than normal enemies
 const HEALTH := 200.0
 const PURSUIT_RANGE := 500.0     # actively hunts villagers

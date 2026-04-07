@@ -29,6 +29,7 @@ const SEPARATION_FORCE := 0.4
 
 var faction_id: int = 0  ## Which faction owns this villager (0 = local player in solo)
 var net_id: int = -1  ## Unique ID for network command targeting
+var villager_name: String = ""  ## Display name
 var is_puppet: bool = false  ## Client-side puppet: interpolates, no brain
 var interp_target: Vector2 = Vector2.ZERO  ## Target position for puppet interpolation
 
@@ -94,6 +95,10 @@ var has_attract_target: bool = false
 
 ## Wall segments for collision (set by main.gd)
 var brain_walls: Array = []  # [{start: Vector2, end: Vector2, is_open: bool}]
+var brain_doorways: Array = []  # [{mid: Vector2, room_a: int, room_b: int}]
+var _doorway_waypoint: Vector2 = Vector2.ZERO  # intermediate target to navigate through a door
+var _has_doorway_waypoint: bool = false
+var break_door_target: Vector2 = Vector2.ZERO  ## Set by break-door command; cleared after breaking
 
 var shoot_target_pos: Vector2 = Vector2.ZERO
 var shoot_target_enemy: Node = null
@@ -340,22 +345,36 @@ func _set_target_clamped(pos: Vector2) -> void:
 
 func _do_movement(delta: float) -> void:
 	if _arrived: return
-	var to_target := _move_target - global_position
+	
+	# If we have a doorway waypoint, navigate to it first
+	var effective_target: Vector2 = _move_target
+	if _has_doorway_waypoint:
+		effective_target = _doorway_waypoint
+		if global_position.distance_to(_doorway_waypoint) < radius + 12.0:
+			_has_doorway_waypoint = false  # reached doorway, continue to real target
+			return
+	
+	var to_target := effective_target - global_position
 	var dist := to_target.length(); var step := _move_speed * delta
 	if dist <= step or dist < 5.0:
-		# Check wall before snapping to target
-		if _wall_blocks(global_position, _move_target):
+		if _wall_blocks(global_position, effective_target):
+			if _try_find_doorway_redirect(effective_target):
+				return
 			_arrived = true
 			return
-		global_position = _move_target; _arrived = true
+		global_position = effective_target
+		if _has_doorway_waypoint:
+			_has_doorway_waypoint = false
+			return  # keep going to real target
+		_arrived = true
 		_idle_timer = GameRNG.randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
 	else:
 		var new_pos: Vector2 = global_position + to_target.normalized() * step
-		# Only clamp to room if not cross-room navigating
 		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract", "command_move"]
 		if cross_room:
-			# Block at closed walls
 			if _wall_blocks(global_position, new_pos):
+				if _try_find_doorway_redirect(_move_target):
+					return
 				_arrived = true
 				return
 		else:
@@ -364,6 +383,27 @@ func _do_movement(delta: float) -> void:
 				new_pos.x = clampf(new_pos.x, room_bounds.position.x + m, room_bounds.end.x - m)
 				new_pos.y = clampf(new_pos.y, room_bounds.position.y + m, room_bounds.end.y - m)
 		global_position = new_pos
+
+
+func _try_find_doorway_redirect(target: Vector2) -> bool:
+	## Find the nearest doorway that would help us reach target. Returns true if found.
+	var best_door: Vector2 = Vector2.ZERO
+	var best_score: float = INF
+	for door in brain_doorways:
+		var dmid: Vector2 = door["mid"]
+		# Only consider doors we can reach without wall collision
+		if _wall_blocks(global_position, dmid):
+			continue
+		# Score: distance to door + distance from door to target
+		var score: float = global_position.distance_to(dmid) + dmid.distance_to(target)
+		if score < best_score:
+			best_score = score
+			best_door = dmid
+	if best_score < INF:
+		_doorway_waypoint = best_door
+		_has_doorway_waypoint = true
+		return true
+	return false
 
 
 func _wall_blocks(from: Vector2, to: Vector2) -> bool:
@@ -534,13 +574,34 @@ func _draw() -> void:
 	if color_type == "yellow" and leveling_meter > 0.01:
 		_draw_bar(-radius, radius + 18.0, bar_w, leveling_meter / YELLOW_LEVEL_TIME, Color(0.94, 0.84, 0.12), Color(0.25, 0.2, 0.05, 0.5))
 
+func _get_faction_border_color() -> Color:
+	if faction_id >= 0:
+		return FactionManager.get_faction_color(faction_id)
+	return Color(0.12, 0.12, 0.12)
+
+func _draw_faction_symbol() -> void:
+	if faction_id < 0 or color_type == "magic_orb":
+		return
+	var sym: String = FactionManager.get_faction_symbol(faction_id)
+	var fc: Color = FactionManager.get_faction_color(faction_id)
+	fc.a = 0.9
+	draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.5, radius * 0.35), sym,
+		HORIZONTAL_ALIGNMENT_CENTER, int(radius), 20, fc)
+
 func _draw_circle_body(col: Color) -> void:
-	draw_circle(Vector2.ZERO, radius, col); draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(0.12, 0.12, 0.12), 2.0, true)
+	draw_circle(Vector2.ZERO, radius, col)
+	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, _get_faction_border_color(), 2.5, true)
+	_draw_faction_symbol()
 func _draw_square_body(col: Color) -> void:
-	var r := radius * 0.85; draw_rect(Rect2(-r, -r, r * 2, r * 2), col); draw_rect(Rect2(-r, -r, r * 2, r * 2), Color(0.12, 0.12, 0.12), false, 2.0)
+	var r := radius * 0.85
+	draw_rect(Rect2(-r, -r, r * 2, r * 2), col)
+	draw_rect(Rect2(-r, -r, r * 2, r * 2), _get_faction_border_color(), false, 2.5)
+	_draw_faction_symbol()
 func _draw_triangle_body(col: Color) -> void:
 	var r := radius; var pts := PackedVector2Array([Vector2(0, -r), Vector2(r * 0.866, r * 0.5), Vector2(-r * 0.866, r * 0.5)])
-	draw_colored_polygon(pts, col); draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), Color(0.12, 0.12, 0.12), 2.0)
+	draw_colored_polygon(pts, col)
+	draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), _get_faction_border_color(), 2.5)
+	_draw_faction_symbol()
 func _draw_bar(x: float, y: float, w: float, ratio: float, fill: Color, track: Color) -> void:
 	draw_rect(Rect2(x, y, w, BAR_H), track)
 	if ratio > 0.001: draw_rect(Rect2(x, y, w * clampf(ratio, 0.0, 1.0), BAR_H), fill)

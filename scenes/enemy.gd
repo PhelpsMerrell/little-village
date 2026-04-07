@@ -4,7 +4,7 @@ extends Node2D
 
 enum State { MOVING, PAUSED, STUNNED }
 
-const BASE_RADIUS := 28.0
+const BASE_RADIUS := 35.0
 const SPEED := 40.0
 const BAR_H := 5.0
 const PAUSE_MIN := 0.8

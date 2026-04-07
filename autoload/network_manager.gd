@@ -42,7 +42,9 @@ var remote_cursors: Dictionary = {}
 ## Lobby sync — uses peer_id → faction_id mapping (no index ambiguity)
 var synced_map_seed: int = -1
 var synced_faction_count: int = 1
+var synced_max_population: int = 50
 var synced_peer_factions: Dictionary = {}  ## { peer_id(int) : faction_id(int) }
+var synced_peer_ready: Dictionary = {}  ## { peer_id(int) : bool }
 var lobby_ready: bool = false
 
 
@@ -130,6 +132,7 @@ func disconnect_game() -> void:
 	_snapshot_queue.clear()
 	remote_cursors.clear()
 	synced_peer_factions.clear()
+	synced_peer_ready.clear()
 	# Disconnect signals safely
 	if multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.disconnect(_on_peer_connected)
@@ -226,20 +229,22 @@ func _rpc_cursor(sender_id: int, x: float, y: float, fid: int) -> void:
 # LOBBY SYNC
 # ==============================================================================
 
-func broadcast_lobby_config(seed_val: int, fcount: int, peer_faction_map: Dictionary) -> void:
+func broadcast_lobby_config(seed_val: int, fcount: int, peer_faction_map: Dictionary, max_pop: int = 50) -> void:
 	if not is_host:
 		return
 	synced_map_seed = seed_val
 	synced_faction_count = fcount
+	synced_max_population = max_pop
 	synced_peer_factions = peer_faction_map.duplicate()
 	if is_online():
-		_rpc_sync_lobby.rpc(seed_val, fcount, peer_faction_map)
+		_rpc_sync_lobby.rpc(seed_val, fcount, peer_faction_map, max_pop)
 
 
 @rpc("authority", "reliable")
-func _rpc_sync_lobby(seed_val: int, fcount: int, pfmap: Dictionary) -> void:
+func _rpc_sync_lobby(seed_val: int, fcount: int, pfmap: Dictionary, max_pop: int = 50) -> void:
 	synced_map_seed = seed_val
 	synced_faction_count = fcount
+	synced_max_population = max_pop
 	synced_peer_factions.clear()
 	for k in pfmap:
 		synced_peer_factions[int(k)] = int(pfmap[k])
@@ -258,6 +263,45 @@ func broadcast_start_game() -> void:
 func _rpc_start_game() -> void:
 	lobby_ready = true
 	game_started.emit()
+
+
+## Client requests to toggle ready
+func send_ready_toggle() -> void:
+	if is_online() and not is_host:
+		_rpc_ready_toggle.rpc_id(1)
+	else:
+		# Host toggles own ready
+		var pid: int = get_my_peer_id()
+		synced_peer_ready[pid] = not synced_peer_ready.get(pid, false)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_ready_toggle() -> void:
+	var sender: int = multiplayer.get_remote_sender_id()
+	synced_peer_ready[sender] = not synced_peer_ready.get(sender, false)
+
+
+## Client requests faction change
+func send_faction_choice(faction_id: int) -> void:
+	if is_online() and not is_host:
+		_rpc_faction_choice.rpc_id(1, faction_id)
+	else:
+		synced_peer_factions[get_my_peer_id()] = faction_id
+
+
+@rpc("any_peer", "reliable")
+func _rpc_faction_choice(faction_id: int) -> void:
+	var sender: int = multiplayer.get_remote_sender_id()
+	if faction_id >= 0 and faction_id < synced_faction_count:
+		synced_peer_factions[sender] = faction_id
+
+
+func are_all_ready() -> bool:
+	var all_peers: Array[int] = get_all_peer_ids()
+	for pid in all_peers:
+		if not synced_peer_ready.get(pid, false):
+			return false
+	return all_peers.size() > 0
 
 
 # ==============================================================================
@@ -286,14 +330,20 @@ func _on_peer_connected(id: int) -> void:
 		connected_peers.append(id)
 	player_connected.emit(id)
 	EventFeed.push("Player %d connected." % id, Color(0.4, 0.7, 0.9))
-	# Re-send lobby config to new peer
-	if is_host and synced_map_seed != -1:
-		_rpc_sync_lobby.rpc_id(id, synced_map_seed, synced_faction_count, synced_peer_factions)
+	# Assign default faction and re-send lobby config
+	if is_host:
+		if not synced_peer_factions.has(id):
+			synced_peer_factions[id] = 0
+		synced_peer_ready[id] = false
+		if synced_map_seed != -1:
+			_rpc_sync_lobby.rpc_id(id, synced_map_seed, synced_faction_count, synced_peer_factions, synced_max_population)
 
 
 func _on_peer_disconnected(id: int) -> void:
 	connected_peers.erase(id)
 	remote_cursors.erase(id)
+	synced_peer_factions.erase(id)
+	synced_peer_ready.erase(id)
 	player_disconnected.emit(id)
 	EventFeed.push("Player %d disconnected." % id, Color(0.8, 0.5, 0.3))
 

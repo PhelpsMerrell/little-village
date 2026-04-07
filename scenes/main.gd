@@ -77,6 +77,13 @@ var _map_generator_script: GDScript = preload("res://scenes/map_generator.gd")
 var map_seed: int = -1  ## -1 = random, >= 0 = deterministic
 var faction_count: int = 1
 var _next_net_id: int = 0
+var _villager_name_counter: Dictionary = {}  ## color -> next number
+
+
+func _gen_villager_name(color_id: String) -> String:
+	var n: int = _villager_name_counter.get(color_id, 0) + 1
+	_villager_name_counter[color_id] = n
+	return "%s-%d" % [color_id.capitalize(), n]
 
 
 func _ready() -> void:
@@ -90,9 +97,10 @@ func _ready() -> void:
 		_init_client_puppets()
 	NetworkManager.remote_command_received.connect(_on_remote_command)
 	NetworkManager.building_placed_remote.connect(_on_building_placed_remote)
-	# Starting resources
-	Economy.stone = 5
-	Economy.fish = 3
+	# Starting resources per faction
+	for fid in FactionManager.get_all_faction_ids():
+		Economy.set_stone(fid, 5)
+		Economy.set_fish(fid, 3)
 	InfluenceManager.villager_shifted.connect(_on_villager_shifted)
 	GameClock.phase_changed.connect(_on_phase_changed)
 	NightEvents.connect_to_clock()
@@ -100,6 +108,7 @@ func _ready() -> void:
 	NightEvents.night_event_ended.connect(_on_night_event_end)
 	_hud.buy_requested.connect(_on_buy_requested)
 	_hud.command_issued.connect(_on_hud_command)
+	_hud.building_command_issued.connect(_on_hud_building_command)
 	_init_options_menu()
 	if SaveManager.has_save():
 		call_deferred("_try_load_save")
@@ -130,6 +139,7 @@ func _init_options_menu() -> void:
 	_options_menu.set_script(preload("res://scenes/options_menu.gd"))
 	_options_menu.name = "OptionsMenu"
 	$UI.add_child(_options_menu)
+	_options_menu.dev_command.connect(_on_dev_command)
 
 
 func _try_load_save() -> void:
@@ -341,6 +351,8 @@ func _collect_villagers() -> void:
 			_next_net_id += 1
 		else:
 			_next_net_id = maxi(_next_net_id, v.net_id + 1)
+		if v.villager_name == "":
+			v.villager_name = _gen_villager_name(str(v.color_type))
 		if not v.resource_dropped.is_connected(_on_villager_dropped_resource):
 			v.resource_dropped.connect(_on_villager_dropped_resource)
 
@@ -364,6 +376,11 @@ func _process(delta: float) -> void:
 	# Client: apply snapshots and draw, skip simulation
 	if not NetworkManager.is_authority():
 		_client_process(delta)
+		return
+
+	if GameClock.is_paused:
+		_update_hud()
+		queue_redraw()
 		return
 
 	EventFeed.check_time_events()
@@ -423,6 +440,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_hud.set_command_menu_visible(false)
 				get_viewport().set_input_as_handled()
 				return
+			if _player.has_building_selection():
+				_player.deselect_building()
+				_hud.set_building_menu_visible(false)
+				get_viewport().set_input_as_handled()
+				return
 			# Nothing selected — open options menu
 			if _options_menu:
 				_options_menu.open()
@@ -432,6 +454,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dev_fog_off = not _dev_fog_off
 			var label := "FOG OFF" if _dev_fog_off else "FOG ON"
 			EventFeed.push("[DEV] %s" % label, Color(1, 1, 0))
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("dev_next_phase"):
+			if NetworkManager.is_authority():
+				GameClock.advance_phase()
+				var phase_label := "DAY %d" % GameClock.day_count if GameClock.is_daytime else "NIGHT %d" % GameClock.day_count
+				EventFeed.push("[DEV] Skipped to %s" % phase_label, Color(1, 1, 0))
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("cmd_hold") and _player.has_selection():
@@ -530,10 +559,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		_hud.set_command_menu_visible(true)
 		return
 
+	# Building selection (homes + churches)
+	var all_buildings: Array = []
+	all_buildings.append_array(homes)
+	all_buildings.append_array(churches)
+	if _player.try_click_building(click_pos, all_buildings, Callable(self, "_room_id_at")):
+		var b: Node = _player.selected_building
+		var can_sell: bool = (b.placed_by_faction == FactionManager.local_faction_id)
+		_hud.set_building_menu_visible(true, can_sell)
+		return
+
 	# Clicked empty ground — deselect
 	if _player.has_selection():
 		_player.deselect_all()
 		_hud.set_command_menu_visible(false)
+	if _player.has_building_selection():
+		_player.deselect_building()
+		_hud.set_building_menu_visible(false)
 
 
 
@@ -562,12 +604,13 @@ func _finalize_placement(pos: Vector2) -> void:
 
 
 func _cancel_placement() -> void:
+	var fid: int = FactionManager.local_faction_id
 	if _placing_item == "house":
 		if NetworkManager.is_authority():
-			Economy.stone += 5
+			Economy.add_stone(5, fid)
 	elif _placing_item == "church":
 		if NetworkManager.is_authority():
-			Economy.stone += 50
+			Economy.add_stone(50, fid)
 	_placing_item = ""
 
 
@@ -577,12 +620,14 @@ func _place_building(item_id: String, pos: Vector2) -> void:
 		var h = _home_scene.instantiate()
 		_homes_container.add_child(h)
 		h.global_position = pos
+		h.placed_by_faction = FactionManager.local_faction_id
 		homes.append(h)
 		EventFeed.push("Home built.", Color(0.7, 0.6, 0.4))
 	elif item_id == "church":
 		var c = _church_scene.instantiate()
 		_churches_container.add_child(c)
 		c.global_position = pos
+		c.placed_by_faction = FactionManager.local_faction_id
 		churches.append(c)
 		EventFeed.push("Church built.", Color(0.5, 0.6, 0.85))
 
@@ -601,6 +646,47 @@ func _on_hud_command(cmd_type: String) -> void:
 		"release":
 			_player.command_release()
 			_hud.set_command_menu_visible(false)
+
+
+func _on_hud_building_command(cmd_type: String) -> void:
+	if not _player.has_building_selection():
+		return
+	var building: Node = _player.selected_building
+	match cmd_type:
+		"evict":
+			building.evict_all()
+			EventFeed.push("Villagers evicted from building.", Color(0.8, 0.6, 0.3))
+		"sell":
+			if building.placed_by_faction != FactionManager.local_faction_id:
+				EventFeed.push("Cannot sell — not your building.", Color(0.9, 0.4, 0.3))
+				return
+			building.evict_all()
+			Economy.add_stone(2, FactionManager.local_faction_id)
+			if building in homes:
+				homes.erase(building)
+			if building in churches:
+				churches.erase(building)
+			_player.deselect_building()
+			_hud.set_building_menu_visible(false)
+			building.queue_free()
+			EventFeed.push("Building sold for 2 stone.", Color(0.6, 0.7, 0.5))
+
+
+func _on_dev_command(cmd: String) -> void:
+	match cmd:
+		"pause":
+			var label := "PAUSED" if GameClock.is_paused else "UNPAUSED"
+			EventFeed.push("[DEV] %s" % label, Color(1, 1, 0))
+		"next_phase":
+			var phase_label := "DAY %d" % GameClock.day_count if GameClock.is_daytime else "NIGHT %d" % GameClock.day_count
+			EventFeed.push("[DEV] Skipped to %s" % phase_label, Color(1, 1, 0))
+		"reset":
+			SaveManager.delete_save()
+			get_tree().change_scene_to_file("res://scenes/main.tscn")
+		"toggle_dev_mode":
+			_dev_fog_off = not _dev_fog_off
+			var label := "DEV MODE ON (fog disabled)" if _dev_fog_off else "DEV MODE OFF"
+			EventFeed.push("[DEV] %s" % label, Color(1, 1, 0))
 
 
 # ==============================================================================
@@ -662,17 +748,7 @@ func _apply_net_command(cmd: Dictionary) -> void:
 				return
 			_place_building(item_id, bpos)
 			NetworkManager.broadcast_building_placed(item_id, bpos)
-		"wall_toggle":
-			var wa: int = int(cmd.get("room_a", -1))
-			var wb: int = int(cmd.get("room_b", -1))
-			var wsx: float = float(cmd.get("sx", 0.0))
-			var wsy: float = float(cmd.get("sy", 0.0))
-			for w in walls:
-				if w.room_a_id == wa and w.room_b_id == wb and not w.is_door:
-					if absf(w.start_pos.x - wsx) < 1.0 and absf(w.start_pos.y - wsy) < 1.0:
-						w.is_open = not w.is_open
-						w.queue_redraw()
-						break
+
 		"drag_start":
 			var nid: int = int(cmd.get("net_id", -1))
 			var v: Node = _find_villager_by_net_id(nid)
@@ -777,14 +853,18 @@ func _room_id_at(pos: Vector2) -> int:
 func _update_brain_context() -> void:
 	# Build wall data once per frame for villager collision
 	var wall_info: Array = []
+	var doorway_info: Array = []  # [{mid: Vector2, room_a: int, room_b: int}]
 	for w in walls:
 		wall_info.append({"start": w.start_pos, "end": w.end_pos, "is_open": w.is_open})
+		if w.is_door or w.is_open:
+			doorway_info.append({"mid": (w.start_pos + w.end_pos) * 0.5, "room_a": w.room_a_id, "room_b": w.room_b_id})
 
 	for v in villagers:
 		var rid: int = v.current_room_id
 		v.brain_enemies = room_enemies.get(rid, [])
 		v.brain_room_villagers = room_villagers.get(rid, [])
 		v.brain_walls = wall_info
+		v.brain_doorways = doorway_info
 		v.has_deposit_in_room = false
 		v.brain_has_resource = false
 		v.brain_has_church = false
@@ -986,8 +1066,9 @@ func _process_red_hunger(delta: float) -> void:
 			v._satiation_timer -= delta
 			v.is_fed = true
 		else:
-			if Economy.fish > 0:
-				Economy.fish -= 1
+			var fid: int = v.faction_id if v.faction_id >= 0 else 0
+			if Economy.get_fish(fid) > 0:
+				Economy.set_fish(fid, Economy.get_fish(fid) - 1)
 				v.is_fed = true
 				v._satiation_timer = v.SATIATION_PER_LEVEL[clampi(v.level, 1, 3)]
 			else:
@@ -1362,6 +1443,26 @@ func _on_buy_requested(item_id: String) -> void:
 		_placing_item = item_id
 
 
+func _get_dupe_chance(faction_id: int) -> float:
+	## Returns 0.0-1.0 duplication probability based on faction pop vs max_pop.
+	## 100% until 15% of max, linear decline to 0% at 100% of max.
+	var max_p: int = FactionManager.max_population
+	if max_p <= 0:
+		return 1.0
+	var current: int = 0
+	for v in villagers:
+		if is_instance_valid(v) and v.visible and v.faction_id == faction_id:
+			if str(v.color_type) != "magic_orb":
+				current += 1
+	var ratio: float = float(current) / float(max_p)
+	if ratio <= 0.15:
+		return 1.0
+	if ratio >= 1.0:
+		return 0.0
+	# Linear from 1.0 at 15% to 0.0 at 100%
+	return clampf(1.0 - (ratio - 0.15) / 0.85, 0.0, 1.0)
+
+
 func _on_villager_shifted(villager, old_color, new_color, spawn_count) -> void:
 	if not NetworkManager.is_authority():
 		return
@@ -1389,8 +1490,11 @@ func _on_villager_shifted(villager, old_color, new_color, spawn_count) -> void:
 	var cname: String = color_names.get(str(new_color), str(new_color))
 	EventFeed.push("A villager joined %s." % cname, ColorRegistry.get_def(str(new_color)).get("display_color", Color.WHITE))
 
-	# Data-driven extra spawns (e.g. red->yellow produces 2 total: the shifted one + 1 extra)
+	# Data-driven extra spawns with population-based probability scaling
+	var dupe_chance: float = _get_dupe_chance(villager.faction_id)
 	for i in range(int(spawn_count) - 1):
+		if GameRNG.randf() > dupe_chance:
+			continue  # Pop cap reduces duplication
 		_spawn_villager(
 			str(new_color),
 			villager.global_position + Vector2(GameRNG.randf_range(-50, 50), GameRNG.randf_range(-50, 50)),
@@ -1405,6 +1509,7 @@ func _spawn_villager(color_id: String, pos: Vector2, p_faction_id: int = 0) -> v
 	v.faction_id = p_faction_id
 	v.net_id = _next_net_id
 	_next_net_id += 1
+	v.villager_name = _gen_villager_name(color_id)
 	v.resource_dropped.connect(_on_villager_dropped_resource)
 	villagers.append(v)
 
@@ -1412,15 +1517,80 @@ func _spawn_villager(color_id: String, pos: Vector2, p_faction_id: int = 0) -> v
 func _update_hud() -> void:
 	if not _hud:
 		return
+	var my_fid: int = FactionManager.local_faction_id
+
+	# Count population for local faction only
 	var counts: Dictionary = {}
+	var faction_pop: Dictionary = {}  # fid -> total count
 	for v in villagers:
-		counts[v.color_type] = counts.get(v.color_type, 0) + 1
+		if not is_instance_valid(v) or not v.visible:
+			continue
+		if str(v.color_type) == "magic_orb":
+			continue
+		if v.faction_id == my_fid:
+			counts[v.color_type] = counts.get(v.color_type, 0) + 1
+		if v.faction_id >= 0:
+			faction_pop[v.faction_id] = faction_pop.get(v.faction_id, 0) + 1
 	_hud.pop_red = counts.get("red", 0)
 	_hud.pop_yellow = counts.get("yellow", 0)
 	_hud.pop_blue = counts.get("blue", 0)
 	_hud.pop_colorless = counts.get("colorless", 0)
 	_hud.pop_enemies = enemies.size() + night_enemies.size()
-	_hud.pop_total = villagers.size()
+	_hud.pop_total = faction_pop.get(my_fid, 0)
+
+	# Populate selected villager info
+	_hud.selected_villager_info.clear()
+	if _player.has_selection():
+		for v in _player.selected_villagers:
+			if not is_instance_valid(v):
+				continue
+			var def: Dictionary = ColorRegistry.get_def(str(v.color_type))
+			_hud.selected_villager_info.append({
+				"name": v.villager_name if v.villager_name != "" else str(v.color_type).capitalize(),
+				"health": v.health,
+				"max_health": v.max_health,
+				"shift": v.shift_meter,
+				"color_type": str(v.color_type),
+				"display_color": def.get("display_color", Color.WHITE),
+			})
+
+	# Populate selected building info
+	_hud.selected_building_info.clear()
+	if _player.has_building_selection():
+		var b: Node = _player.selected_building
+		var b_type: String = "Home" if b in homes else "Church"
+		var b_cap: int = b.get_capacity() if b.has_method("get_capacity") else 4
+		var b_occ: int = b.get_sheltered_count() if b.has_method("get_sheltered_count") else 0
+		var b_fid: int = b.placed_by_faction if b.get("placed_by_faction") != null else -1
+		_hud.selected_building_info = {
+			"type": b_type,
+			"capacity": b_cap,
+			"occupied": b_occ,
+			"faction_id": b_fid,
+			"faction_symbol": FactionManager.get_faction_symbol(b_fid) if b_fid >= 0 else "?",
+			"faction_color": FactionManager.get_faction_color(b_fid) if b_fid >= 0 else Color(0.5, 0.5, 0.5),
+		}
+
+	# Count rooms owned per faction
+	var faction_rooms: Dictionary = {}
+	for rid in RoomOwnership.ownership:
+		var owner_fid: int = RoomOwnership.ownership[rid]
+		if owner_fid >= 0:
+			faction_rooms[owner_fid] = faction_rooms.get(owner_fid, 0) + 1
+
+	# Build score data
+	_hud.score_data.clear()
+	for fid in FactionManager.get_all_faction_ids():
+		_hud.score_data.append({
+			"faction_id": fid,
+			"symbol": FactionManager.get_faction_symbol(fid),
+			"name": FactionManager.get_faction_name(fid),
+			"color": FactionManager.get_faction_color(fid),
+			"pop": faction_pop.get(fid, 0),
+			"stone": Economy.get_stone(fid),
+			"fish": Economy.get_fish(fid),
+			"rooms": faction_rooms.get(fid, 0),
+		})
 
 
 func _on_villager_dropped_resource(villager: Node2D, resource_type: String) -> void:
@@ -1583,11 +1753,17 @@ func _broadcast_snapshot() -> void:
 			f_data.append(i)
 	snap["fc"] = f_data
 
-	# Economy
-	snap["eco"] = [Economy.stone, Economy.fish]
+	# Economy — per-faction
+	var eco_data: Dictionary = {}
+	for fid in FactionManager.get_all_faction_ids():
+		eco_data[fid] = [Economy.get_stone(fid), Economy.get_fish(fid)]
+	snap["eco"] = eco_data
 
-	# Clock
-	snap["clk"] = [1 if GameClock.is_daytime else 0]
+	# Clock — full state for sync
+	snap["clk"] = [GameClock.elapsed, GameClock.day_count, 1 if GameClock.is_paused else 0]
+
+	# Dev state
+	snap["dev"] = [1 if _dev_fog_off else 0]
 
 	# Room ownership
 	snap["own"] = RoomOwnership.ownership.duplicate()
@@ -1744,16 +1920,27 @@ func _apply_snapshot(snap: Dictionary) -> void:
 				fs.collected = true
 				fs.visible = false
 
-	# Economy
-	var eco: Array = snap.get("eco", [])
-	if eco.size() >= 2:
-		Economy.stone = int(eco[0])
-		Economy.fish = int(eco[1])
+	# Economy — per-faction
+	var eco: Dictionary = snap.get("eco", {})
+	for fid_key in eco:
+		var fid: int = int(fid_key)
+		var vals: Array = eco[fid_key]
+		if vals.size() >= 2:
+			Economy.set_stone(fid, int(vals[0]))
+			Economy.set_fish(fid, int(vals[1]))
 
-	# Clock
+	# Clock — full state sync
 	var clk: Array = snap.get("clk", [])
-	if clk.size() >= 1:
-		GameClock.is_daytime = (int(clk[0]) == 1)
+	if clk.size() >= 3:
+		GameClock.elapsed = float(clk[0])
+		GameClock.day_count = int(clk[1])
+		GameClock.is_paused = (int(clk[2]) == 1)
+		GameClock.is_daytime = GameClock.elapsed < GameClock.DAY_DURATION
+
+	# Dev state
+	var dev: Array = snap.get("dev", [])
+	if dev.size() >= 1:
+		_dev_fog_off = (int(dev[0]) == 1)
 
 	# Room ownership
 	var own: Dictionary = snap.get("own", {})
@@ -1813,9 +2000,6 @@ func _draw() -> void:
 	# Remote cursors
 	_draw_remote_cursors()
 
-	# Faction markers at villager centroids
-	_draw_faction_markers()
-
 
 func _draw_remote_cursors() -> void:
 	var my_peer := NetworkManager.get_my_peer_id()
@@ -1836,10 +2020,8 @@ func _draw_remote_cursors() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, fc)
 
 
-const FACTION_GLYPHS := ["P1", "P2", "P3", "P4"]
-
 func _draw_faction_markers() -> void:
-	## Draw a faction glyph at the centroid of each faction's villagers.
+	## Draw a faction symbol at the centroid of each faction's villagers.
 	var faction_positions: Dictionary = {}  # fid -> [positions]
 	for v in villagers:
 		if not is_instance_valid(v) or not v.visible:
@@ -1861,7 +2043,7 @@ func _draw_faction_markers() -> void:
 			centroid += p
 		centroid /= float(positions.size())
 		var fc: Color = FactionManager.get_faction_color(fid)
-		var glyph: String = FACTION_GLYPHS[fid] if fid < FACTION_GLYPHS.size() else "P?"
+		var glyph: String = FactionManager.get_faction_symbol(fid)
 		var bg_color := Color(0.0, 0.0, 0.0, 0.45)
 		draw_rect(Rect2(centroid.x - 14, centroid.y - 30, 28, 18), bg_color)
 		draw_string(ThemeDB.fallback_font, Vector2(centroid.x - 10, centroid.y - 16),

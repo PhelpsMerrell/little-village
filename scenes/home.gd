@@ -1,22 +1,20 @@
 extends Node2D
-## A home that shelters up to 4 villagers. Drag villagers onto it to shelter them.
-## During night, sheltered villagers are safe from enemies.
-## Place in the world — drag-droppable scene.
+## A home that shelters up to 4 villagers.
+## Cannot be moved after placement. Selectable for sell/evict commands.
 
 const CAPACITY := 4
 const HOME_SIZE := Vector2(80, 80)
 const INTAKE_RADIUS := 60.0
 
 var sheltered: Array = []   # villager refs currently inside
+var placed_by_faction: int = -1  ## Faction that built this (only they can sell)
+var is_selected: bool = false
 
 @onready var _area: Area2D = $InputArea
 
-var _dragging := false
-var _drag_offset := Vector2.ZERO
-
 
 func _ready() -> void:
-	_area.input_event.connect(_on_area_input)
+	pass
 
 
 func get_capacity() -> int:
@@ -24,7 +22,6 @@ func get_capacity() -> int:
 
 
 func get_sheltered_count() -> int:
-	# Clean dead refs
 	sheltered = sheltered.filter(func(v): return is_instance_valid(v))
 	return sheltered.size()
 
@@ -56,23 +53,9 @@ func release_all() -> void:
 	sheltered.clear()
 
 
-# ── input (drag the home itself) ─────────────────────────────────────────────
-
-func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		_dragging = true
-		_drag_offset = global_position - get_global_mouse_position()
-		z_index = 10
-
-
-func _input(event: InputEvent) -> void:
-	if not _dragging:
-		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		_dragging = false
-		z_index = 0
-	elif event is InputEventMouseMotion:
-		global_position = get_global_mouse_position() + _drag_offset
+func evict_all() -> void:
+	## Force all sheltered villagers out (player command).
+	release_all()
 
 
 # ── drawing ──────────────────────────────────────────────────────────────────
@@ -103,6 +86,11 @@ func _draw() -> void:
 	# Outline
 	draw_rect(Rect2(-hw * 0.8, -hh * 0.3, hw * 1.6, hh * 1.3),
 		Color(0.3, 0.2, 0.12), false, 2.0)
+
+	# Selection ring
+	if is_selected:
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
+		draw_arc(Vector2.ZERO, hw + 10.0, 0.0, TAU, 24, Color(1.0, 0.9, 0.5, pulse), 2.5, true)
 
 	# Capacity indicator
 	var label := "%d/%d" % [count, CAPACITY]

@@ -4,8 +4,11 @@ extends Node
 
 const LOCAL_FACTION_ID := 0
 
+const FACTION_SYMBOLS: Array[String] = ["$", "@", "?", "¥", "£", "€", "#", "%"]
+
 var factions: Dictionary = {}  # faction_id -> FactionData
 var local_faction_id: int = LOCAL_FACTION_ID
+var max_population: int = 50  ## Per-faction max pop, set from lobby
 
 
 func _ready() -> void:
@@ -32,6 +35,12 @@ func get_faction_name(id: int) -> String:
 
 func get_faction_color(id: int) -> Color:
 	return factions.get(id, {}).get("color", Color.WHITE)
+
+
+func get_faction_symbol(id: int) -> String:
+	if id >= 0 and id < FACTION_SYMBOLS.size():
+		return FACTION_SYMBOLS[id]
+	return "?"
 
 
 func is_local_faction(faction_id: int) -> bool:

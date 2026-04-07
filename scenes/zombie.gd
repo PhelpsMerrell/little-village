@@ -3,7 +3,7 @@ extends Node2D
 ## On touch, converts non-sheltered villagers into more zombies.
 ## Slow but relentless. Killed by any red. Despawns at dawn.
 
-const RADIUS := 26.0
+const RADIUS := 32.0
 const SPEED := 25.0             # slow shamble
 const HEALTH := 30.0
 const PURSUIT_RANGE := 400.0

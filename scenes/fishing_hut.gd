@@ -23,7 +23,8 @@ func try_deposit(villager: Node) -> bool:
 	var dist: float = villager.global_position.distance_to(global_position)
 	if dist < DEPOSIT_RADIUS:
 		villager.carrying_resource = ""
-		Economy.add_fish(1)
+		var fid: int = villager.faction_id if villager.faction_id >= 0 else 0
+		Economy.add_fish(1, fid)
 		_deposits += 1
 		return true
 	return false

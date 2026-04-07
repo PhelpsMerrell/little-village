@@ -13,7 +13,7 @@ func _register_defaults() -> void:
 	register({
 		"id": "red",
 		"display_color": Color(0.9, 0.22, 0.2),
-		"radius": 28.0,
+		"radius": 35.0,
 		"health": 50,
 		"movement_speed": 6.0,
 		"shifts_to": "yellow",
@@ -30,7 +30,7 @@ func _register_defaults() -> void:
 	register({
 		"id": "yellow",
 		"display_color": Color(0.94, 0.84, 0.12),
-		"radius": 22.0,
+		"radius": 27.0,
 		"health": 15,
 		"movement_speed": 10.0,
 		"shifts_to": "blue",
@@ -47,7 +47,7 @@ func _register_defaults() -> void:
 	register({
 		"id": "blue",
 		"display_color": Color(0.2, 0.4, 0.9),
-		"radius": 36.0,
+		"radius": 45.0,
 		"health": 200,
 		"movement_speed": 3.0,
 		"shifts_to": "red",
@@ -67,7 +67,7 @@ func _register_defaults() -> void:
 	register({
 		"id": "colorless",
 		"display_color": Color(0.75, 0.75, 0.75),
-		"radius": 20.0,
+		"radius": 25.0,
 		"health": 25,
 		"movement_speed": 7.0,
 		"shifts_to": "red",
@@ -87,7 +87,7 @@ func _register_defaults() -> void:
 	register({
 		"id": "magic_orb",
 		"display_color": Color(0.82, 0.82, 0.82),
-		"radius": 20.0,
+		"radius": 25.0,
 		"health": 100,
 		"movement_speed": 0.0,
 		"shifts_to": "",

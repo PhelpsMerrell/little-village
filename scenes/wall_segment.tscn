@@ -1,15 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scenes/wall_segment.gd" id="1_script"]
 
-[sub_resource type="RectangleShape2D" id="1_shape"]
-size = Vector2(100, 34)
-
 [node name="WallSegment" type="Node2D"]
 script = ExtResource("1_script")
-
-[node name="ClickArea" type="Area2D" parent="."]
-input_pickable = true
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="ClickArea"]
-shape = SubResource("1_shape")

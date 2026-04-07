@@ -14,6 +14,8 @@ const ACTIONS: Dictionary = {
 	"quick_save": {"default_key": KEY_F5, "label": "Quick Save"},
 	"toggle_fog_dev": {"default_key": KEY_0, "label": "[DEV] Toggle Fog"},
 	"deselect": {"default_key": KEY_ESCAPE, "label": "Deselect / Menu"},
+	"cmd_break_door": {"default_key": KEY_R, "label": "Break Door (Red)"},
+	"dev_next_phase": {"default_key": KEY_9, "label": "[DEV] Next Phase"},
 }
 
 var _bindings: Dictionary = {}  ## action_name -> keycode

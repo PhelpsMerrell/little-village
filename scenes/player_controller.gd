@@ -7,6 +7,7 @@ var faction_id: int = 0
 var selected_villagers: Array = []
 var _selected_resource: Node = null
 var _selected_resource_type: String = ""
+var selected_building: Node = null  ## Currently selected building (home or church)
 
 
 func _get_selected_net_ids() -> Array:
@@ -36,10 +37,30 @@ func deselect_all() -> void:
 		if is_instance_valid(v):
 			v.is_selected = false
 	selected_villagers.clear()
+	deselect_building()
 
 
 func has_selection() -> bool:
 	return not selected_villagers.is_empty()
+
+
+func select_building(b: Node) -> void:
+	deselect_all()
+	selected_building = b
+	b.is_selected = true
+
+
+func deselect_building() -> void:
+	if selected_building != null and is_instance_valid(selected_building):
+		selected_building.is_selected = false
+	selected_building = null
+
+
+func has_building_selection() -> bool:
+	if selected_building != null and is_instance_valid(selected_building):
+		return true
+	selected_building = null
+	return false
 
 
 func command_move_to(target_pos: Vector2) -> void:
@@ -186,3 +207,47 @@ func has_resource_selection() -> bool:
 			return false
 		return true
 	return false
+
+
+func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Callable) -> bool:
+	## Try to select a building. Any building owned by local faction is selectable.
+	var best_b: Node = null
+	var best_d: float = INF
+	for b in buildings:
+		if not is_instance_valid(b):
+			continue
+		var d: float = click_pos.distance_to(b.global_position)
+		if d < 60.0 and d < best_d:
+			best_d = d
+			best_b = b
+	if best_b:
+		select_building(best_b)
+		return true
+	return false
+
+
+func command_break_door(target_pos: Vector2) -> void:
+	## Send break-door command for selected red villagers.
+	if selected_villagers.is_empty():
+		return
+	var red_ids: Array = []
+	for v in selected_villagers:
+		if is_instance_valid(v) and str(v.color_type) == "red":
+			red_ids.append(v.net_id)
+	if red_ids.is_empty():
+		EventFeed.push("Only red villagers can break doors.", Color(0.9, 0.4, 0.3))
+		return
+	if NetworkManager.is_online() and not NetworkManager.is_authority():
+		NetworkManager.send_command({
+			"type": "break_door",
+			"net_ids": red_ids,
+			"tx": target_pos.x,
+			"ty": target_pos.y,
+		})
+	else:
+		for nid in red_ids:
+			for v in selected_villagers:
+				if is_instance_valid(v) and v.net_id == nid:
+					v.command_move_to(target_pos)
+					v.break_door_target = target_pos
+	EventFeed.push("Red sent to break door.", Color(0.9, 0.5, 0.3))

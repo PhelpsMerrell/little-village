@@ -1,12 +1,12 @@
 extends Control
-## Full-screen HUD. Day/night bar, population, resources, shop, event feed, command menu.
+## Full-screen HUD. Day/night bar, population, resources, shop, event feed,
+## command menu, building menu, score overlay (Tab).
 
 const BAR_HEIGHT := 48.0
 const FEED_WIDTH := 340.0
 const FEED_LINE_H := 32.0
 const FEED_VISIBLE_COUNT := 5
 const FEED_FADE_TIME := 8000
-const F := 2  ## font scale multiplier
 
 var pop_red: int = 0
 var pop_yellow: int = 0
@@ -26,16 +26,34 @@ var _feed_hover: bool = false
 ## Command menu state
 var _cmd_menu_open: bool = false
 var _cmd_hover: String = ""
-var _pending_command: String = ""  ## "move", "hold", "house", "release" — waiting for click
+var _pending_command: String = ""
 const CMD_BUTTONS := [
 	{"id": "move", "label": "Move", "color": Color(0.3, 0.8, 0.4)},
 	{"id": "hold", "label": "Hold", "color": Color(1.0, 0.8, 0.2)},
 	{"id": "house", "label": "House", "color": Color(0.7, 0.5, 0.3)},
+	{"id": "break_door", "label": "Break Door", "color": Color(0.9, 0.4, 0.2)},
 	{"id": "release", "label": "Release", "color": Color(0.6, 0.6, 0.6)},
 ]
 
+## Building menu state
+var _building_menu_open: bool = false
+var _building_can_sell: bool = false
+const BUILDING_BUTTONS := [
+	{"id": "evict", "label": "Evict All", "color": Color(0.8, 0.6, 0.3)},
+	{"id": "sell", "label": "Sell ($2)", "color": Color(0.9, 0.3, 0.3)},
+]
+
+## Selected villager info
+var selected_villager_info: Array = []
+var selected_building_info: Dictionary = {}
+
+## Score data: [{faction_id, symbol, color, pop, stone, fish, rooms}]
+var score_data: Array = []
+var _score_open: bool = false
+
 signal buy_requested(item_id: String)
 signal command_issued(cmd_type: String)
+signal building_command_issued(cmd_type: String)
 
 
 func _ready() -> void:
@@ -52,7 +70,17 @@ func _refresh_shop() -> void:
 
 func set_command_menu_visible(show: bool) -> void:
 	_cmd_menu_open = show
+	if show:
+		_building_menu_open = false
 	if not show:
+		_pending_command = ""
+
+
+func set_building_menu_visible(show: bool, can_sell: bool = false) -> void:
+	_building_menu_open = show
+	_building_can_sell = can_sell
+	if show:
+		_cmd_menu_open = false
 		_pending_command = ""
 
 
@@ -74,6 +102,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_shop_open = not _shop_open
 			get_viewport().set_input_as_handled()
 			return
+		if event.keycode == KEY_TAB:
+			_score_open = not _score_open
+			get_viewport().set_input_as_handled()
+			return
 
 	var vp_size: Vector2 = get_viewport_rect().size
 
@@ -83,12 +115,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		if cmd_id != "":
 			if cmd_id == "move":
 				_pending_command = "move"
-			elif cmd_id == "hold":
-				command_issued.emit("hold")
-			elif cmd_id == "house":
-				command_issued.emit("house")
-			elif cmd_id == "release":
-				command_issued.emit("release")
+			elif cmd_id == "break_door":
+				_pending_command = "break_door"
+			else:
+				command_issued.emit(cmd_id)
+			get_viewport().set_input_as_handled()
+			return
+
+	# Building menu clicks
+	if _building_menu_open and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var bcmd_id: String = _get_building_cmd_at(event.position, vp_size)
+		if bcmd_id != "":
+			if bcmd_id == "sell" and not _building_can_sell:
+				pass
+			else:
+				building_command_issued.emit(bcmd_id)
 			get_viewport().set_input_as_handled()
 			return
 
@@ -116,7 +157,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var feed_rect := _get_feed_rect(vp_size)
 		_feed_hover = feed_rect.has_point(event.position)
-		_cmd_hover = _get_cmd_at(event.position, vp_size) if _cmd_menu_open else ""
+		_cmd_hover = ""
+		if _cmd_menu_open:
+			_cmd_hover = _get_cmd_at(event.position, vp_size)
+		elif _building_menu_open:
+			_cmd_hover = _get_building_cmd_at(event.position, vp_size)
 
 	if not _shop_open:
 		return
@@ -146,19 +191,32 @@ func _get_feed_rect(vp_size: Vector2) -> Rect2:
 
 
 func _get_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
-	var bx: float = vp_size.x - 220.0
-	var by: float = vp_size.y - 260.0
+	var bx: float = vp_size.x - 150.0
+	var by: float = vp_size.y - 222.0
 	for i in CMD_BUTTONS.size():
-		var iy: float = by + i * 48.0
-		if Rect2(bx, iy, 200, 42).has_point(pos):
+		var iy: float = by + i * 42.0
+		if Rect2(bx, iy, 120, 36).has_point(pos):
 			return CMD_BUTTONS[i]["id"]
+	return ""
+
+
+func _get_building_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
+	var panel_w: float = 380.0
+	var panel_h: float = 200.0
+	var px: float = vp_size.x - panel_w - 10.0
+	var py: float = vp_size.y - panel_h - 10.0
+	var cmd_x: float = px + panel_w - 140.0
+	for i in BUILDING_BUTTONS.size():
+		var iy: float = py + 28.0 + i * 50.0
+		if Rect2(cmd_x, iy, 120, 40).has_point(pos):
+			return BUILDING_BUTTONS[i]["id"]
 	return ""
 
 
 func _draw() -> void:
 	var vp_size: Vector2 = get_viewport_rect().size
 
-	# ── Day/Night bar ────────────────────────────────────────────────────
+	# ── Day/Night bar ────────────────────────────────────────────
 	draw_rect(Rect2(0, 0, vp_size.x, BAR_HEIGHT), Color(0.08, 0.08, 0.1, 0.85))
 	var day_frac: float = GameClock.DAY_DURATION / GameClock.CYCLE_DURATION
 	var day_w: float = vp_size.x * day_frac
@@ -169,83 +227,253 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(day_w + 10, 30), "NIGHT", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.5, 0.5, 0.8, 0.6))
 	draw_string(ThemeDB.fallback_font, Vector2(vp_size.x * 0.5 - 80, 32), GameClock.get_time_string(), HORIZONTAL_ALIGNMENT_CENTER, -1, 24, Color(0.85, 0.85, 0.85))
 
-	# ── Population panel (bottom-left) ───────────────────────────────────
+	if GameClock.is_paused:
+		draw_string(ThemeDB.fallback_font, Vector2(vp_size.x * 0.5 - 40, 60),
+			"PAUSED", HORIZONTAL_ALIGNMENT_CENTER, -1, 28, Color(1.0, 0.8, 0.2, 0.8 + sin(Time.get_ticks_msec() * 0.003) * 0.2))
+
+	# ── Population panel (bottom-left) ───────────────────────────
 	var panel_y: float = vp_size.y - 220
 	draw_rect(Rect2(0, panel_y, 420, 220), Color(0.06, 0.06, 0.08, 0.8))
 	draw_rect(Rect2(0, panel_y, 420, 220), Color(0.3, 0.3, 0.3, 0.3), false, 1.0)
 
-	var ty: float = panel_y + 30.0
-	_draw_pop_line(16, ty, "Red", pop_red, Color(0.9, 0.22, 0.2)); ty += 28.0
-	_draw_pop_line(16, ty, "Yellow", pop_yellow, Color(0.94, 0.84, 0.12)); ty += 28.0
-	_draw_pop_line(16, ty, "Blue", pop_blue, Color(0.2, 0.4, 0.9)); ty += 28.0
+	var fid: int = FactionManager.local_faction_id
+	var sym: String = FactionManager.get_faction_symbol(fid)
+	var fc: Color = FactionManager.get_faction_color(fid)
+	draw_string(ThemeDB.fallback_font, Vector2(16, panel_y + 24), "Faction %s" % sym,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, fc)
+
+	var ty: float = panel_y + 48.0
+	_draw_pop_line(16, ty, "Red", pop_red, Color(0.9, 0.22, 0.2)); ty += 24.0
+	_draw_pop_line(16, ty, "Yellow", pop_yellow, Color(0.94, 0.84, 0.12)); ty += 24.0
+	_draw_pop_line(16, ty, "Blue", pop_blue, Color(0.2, 0.4, 0.9)); ty += 24.0
 	_draw_pop_line(16, ty, "Colorless", pop_colorless, Color(0.7, 0.7, 0.7))
 
-	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 46), "Enemies: %d" % pop_enemies,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.8, 0.2, 0.2))
-	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 76), "Total: %d" % pop_total,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.65, 0.65, 0.65))
+	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 56), "Enemies: %d" % pop_enemies,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.2, 0.2))
+	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 80), "Pop: %d / %d" % [pop_total, FactionManager.max_population],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.65, 0.65, 0.65))
 
+	# Per-faction resources
+	var my_stone: int = Economy.get_stone(fid)
+	var my_fish: int = Economy.get_fish(fid)
 	draw_circle(Vector2(260, panel_y + 116), 8.0, Color(0.5, 0.52, 0.48))
 	draw_string(ThemeDB.fallback_font, Vector2(275, panel_y + 122),
-		"Stone: %d" % Economy.stone, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.6, 0.65, 0.55))
-	draw_circle(Vector2(260, panel_y + 148), 8.0, Color(0.3, 0.55, 0.75))
-	draw_string(ThemeDB.fallback_font, Vector2(275, panel_y + 154),
-		"Fish: %d" % Economy.fish, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.4, 0.65, 0.8))
+		"Stone: %d" % my_stone, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.6, 0.65, 0.55))
+	draw_circle(Vector2(260, panel_y + 144), 8.0, Color(0.3, 0.55, 0.75))
+	draw_string(ThemeDB.fallback_font, Vector2(275, panel_y + 150),
+		"Fish: %d" % my_fish, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.4, 0.65, 0.8))
 
-	# Pending command indicator
+	draw_string(ThemeDB.fallback_font, Vector2(16, panel_y + 200),
+		"Tab: Scoreboard", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.4, 0.4, 0.45))
+
+	# Pending command
 	if _pending_command != "":
 		draw_string(ThemeDB.fallback_font, Vector2(16, panel_y - 10),
 			"Click target for: %s" % _pending_command.to_upper(),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.9, 0.9, 0.3, 0.9))
 
-	# ── Command menu (bottom-right, when selection active) ───────────────
+	# ── Selection panel: villager info (left) + commands (right) ──
 	if _cmd_menu_open:
-		_draw_cmd_menu(vp_size)
+		_draw_selection_panel(vp_size)
 
-	# ── Event feed ───────────────────────────────────────────────────────
+	# ── Building menu ────────────────────────────────────────────
+	if _building_menu_open:
+		_draw_building_menu(vp_size)
+
+	# ── Score overlay (Tab) ──────────────────────────────────────
+	if _score_open:
+		_draw_score(vp_size)
+
+	# ── Event feed ───────────────────────────────────────────────
 	_draw_feed(vp_size)
 
-	# ── Shop ─────────────────────────────────────────────────────────────
+	# ── Shop ─────────────────────────────────────────────────────
 	if _shop_open:
 		_draw_shop(vp_size)
 
 
-func _draw_cmd_menu(vp_size: Vector2) -> void:
-	var bx: float = vp_size.x - 220.0
-	var by: float = vp_size.y - 260.0
-	draw_rect(Rect2(bx - 10, by - 30, 220, 230), Color(0.06, 0.06, 0.08, 0.85))
-	draw_rect(Rect2(bx - 10, by - 30, 220, 230), Color(0.4, 0.4, 0.4, 0.3), false, 1.0)
-	draw_string(ThemeDB.fallback_font, Vector2(bx, by - 8), "COMMANDS", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.7, 0.7, 0.7))
+func _draw_selection_panel(vp_size: Vector2) -> void:
+	## Side-by-side: villager info on left, commands on right, bottom-right corner
+	var panel_w: float = 380.0
+	var panel_h: float = 240.0
+	var px: float = vp_size.x - panel_w - 10.0
+	var py: float = vp_size.y - panel_h - 10.0
+
+	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.06, 0.06, 0.08, 0.88))
+	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.4, 0.4, 0.4, 0.3), false, 1.0)
+
+	# Left side: villager info (220px wide)
+	var info_x: float = px + 10.0
+	draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 18), "SELECTED",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
+
+	var max_show: int = mini(selected_villager_info.size(), 4)
+	for i in max_show:
+		var info: Dictionary = selected_villager_info[i]
+		var iy: float = py + 28.0 + i * 48.0
+		var col: Color = info.get("display_color", Color.WHITE)
+		draw_circle(Vector2(info_x + 8, iy + 14), 6.0, col)
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, iy + 18),
+			str(info.get("name", "Villager")), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
+		var hp: int = int(info.get("health", 0))
+		var max_hp: int = int(info.get("max_health", 1))
+		var shift: int = int(info.get("shift", 0))
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, iy + 34),
+			"HP:%d/%d  Shift:%d%%" % [hp, max_hp, shift], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.55, 0.55, 0.55))
+		var bar_w: float = 140.0
+		var hp_ratio: float = float(hp) / float(max_hp) if max_hp > 0 else 1.0
+		draw_rect(Rect2(info_x + 20, iy + 38, bar_w, 3), Color(0.2, 0.2, 0.2, 0.6))
+		draw_rect(Rect2(info_x + 20, iy + 38, bar_w * hp_ratio, 3), Color(0.3, 0.8, 0.35) if hp_ratio > 0.5 else Color(0.85, 0.25, 0.2))
+
+	if selected_villager_info.size() > 4:
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, py + panel_h - 14),
+			"+%d more" % (selected_villager_info.size() - 4), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.5, 0.5, 0.5))
+
+	# Right side: commands (140px wide)
+	var cmd_x: float = px + panel_w - 140.0
+	draw_string(ThemeDB.fallback_font, Vector2(cmd_x, py + 18), "COMMANDS",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
 	for i in CMD_BUTTONS.size():
 		var btn: Dictionary = CMD_BUTTONS[i]
-		var iy: float = by + i * 48.0
+		var iy: float = py + 28.0 + i * 42.0
 		var hovered: bool = (_cmd_hover == btn["id"])
 		var bg: Color = btn["color"].darkened(0.2 if not hovered else 0.0)
 		bg.a = 0.8 if hovered else 0.5
-		draw_rect(Rect2(bx, iy, 200, 42), bg)
-		draw_rect(Rect2(bx, iy, 200, 42), Color(0.5, 0.5, 0.5, 0.4), false, 1.0)
-		draw_string(ThemeDB.fallback_font, Vector2(bx + 16, iy + 28), btn["label"],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.95) if hovered else Color(0.9, 0.9, 0.9, 0.8))
+		draw_rect(Rect2(cmd_x, iy, 120, 36), bg)
+		draw_rect(Rect2(cmd_x, iy, 120, 36), Color(0.5, 0.5, 0.5, 0.4), false, 1.0)
+		draw_string(ThemeDB.fallback_font, Vector2(cmd_x + 10, iy + 24), btn["label"],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1, 0.95) if hovered else Color(0.9, 0.9, 0.9, 0.8))
+
+
+func _draw_building_menu(vp_size: Vector2) -> void:
+	var panel_w: float = 380.0
+	var panel_h: float = 200.0
+	var px: float = vp_size.x - panel_w - 10.0
+	var py: float = vp_size.y - panel_h - 10.0
+
+	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.06, 0.06, 0.08, 0.88))
+	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.4, 0.4, 0.4, 0.3), false, 1.0)
+
+	# Left side: building info
+	var info_x: float = px + 10.0
+	draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 18), "BUILDING",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
+
+	if not selected_building_info.is_empty():
+		var btype: String = selected_building_info.get("type", "Building")
+		var occ: int = selected_building_info.get("occupied", 0)
+		var cap: int = selected_building_info.get("capacity", 4)
+		var fc: Color = selected_building_info.get("faction_color", Color(0.5, 0.5, 0.5))
+		var fsym: String = selected_building_info.get("faction_symbol", "?")
+
+		# Mini building icon
+		var icon_cx: float = info_x + 48.0
+		var icon_cy: float = py + 88.0
+		if btype == "Home":
+			draw_rect(Rect2(icon_cx - 26, icon_cy - 8, 52, 32), Color(0.55, 0.4, 0.25, 0.8))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(icon_cx, icon_cy - 36),
+				Vector2(icon_cx + 32, icon_cy - 8),
+				Vector2(icon_cx - 32, icon_cy - 8)]),
+				Color(0.6, 0.2, 0.15, 0.8))
+		else:
+			draw_rect(Rect2(icon_cx - 20, icon_cy - 8, 40, 32), Color(0.35, 0.38, 0.5, 0.8))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(icon_cx, icon_cy - 40),
+				Vector2(icon_cx + 13, icon_cy - 8),
+				Vector2(icon_cx - 13, icon_cy - 8)]),
+				Color(0.3, 0.35, 0.55, 0.8))
+
+		draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 116), btype,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.85, 0.85, 0.85))
+		draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 142),
+			"Sheltered: %d / %d" % [occ, cap],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.65, 0.65, 0.7))
+		draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 165),
+			"Owner: %s" % fsym,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, fc)
+
+	# Right side: action buttons
+	var cmd_x: float = px + panel_w - 140.0
+	draw_string(ThemeDB.fallback_font, Vector2(cmd_x, py + 18), "ACTIONS",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
+	for i in BUILDING_BUTTONS.size():
+		var btn: Dictionary = BUILDING_BUTTONS[i]
+		var iy: float = py + 28.0 + i * 50.0
+		var hovered: bool = (_cmd_hover == btn["id"])
+		var is_sell: bool = (btn["id"] == "sell")
+		var disabled: bool = is_sell and not _building_can_sell
+		var bg: Color
+		if disabled: bg = Color(0.2, 0.2, 0.2, 0.3)
+		else:
+			bg = btn["color"].darkened(0.2 if not hovered else 0.0)
+			bg.a = 0.8 if hovered else 0.5
+		draw_rect(Rect2(cmd_x, iy, 120, 40), bg)
+		draw_rect(Rect2(cmd_x, iy, 120, 40), Color(0.5, 0.5, 0.5, 0.4), false, 1.0)
+		var label_text: String = btn["label"] if not disabled else "Conquered"
+		var text_col: Color = Color(0.4, 0.4, 0.4) if disabled else (Color(1, 1, 1, 0.95) if hovered else Color(0.9, 0.9, 0.9, 0.8))
+		draw_string(ThemeDB.fallback_font, Vector2(cmd_x + 10, iy + 27), label_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, text_col)
+
+
+func _draw_score(vp_size: Vector2) -> void:
+	var sw: float = 500.0
+	var sh: float = 60.0 + score_data.size() * 50.0
+	var sx: float = (vp_size.x - sw) * 0.5
+	var sy: float = 100.0
+
+	draw_rect(Rect2(sx, sy, sw, sh), Color(0.04, 0.04, 0.06, 0.92))
+	draw_rect(Rect2(sx, sy, sw, sh), Color(0.5, 0.5, 0.5, 0.3), false, 2.0)
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 20, sy + 28),
+		"SCOREBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.9, 0.85, 0.6))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + sw - 120, sy + 28),
+		"Tab to close", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.45, 0.45, 0.5))
+
+	# Headers
+	var hy: float = sy + 48.0
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 20, hy), "Faction", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 140, hy), "Pop", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 220, hy), "Stone", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 300, hy), "Fish", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 380, hy), "Rooms", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+
+	for i in score_data.size():
+		var sd: Dictionary = score_data[i]
+		var ry: float = sy + 68.0 + i * 50.0
+		var row_col: Color = sd.get("color", Color.WHITE)
+		var is_local: bool = (sd.get("faction_id", -1) == FactionManager.local_faction_id)
+		if is_local:
+			draw_rect(Rect2(sx + 5, ry - 16, sw - 10, 44), Color(row_col.r, row_col.g, row_col.b, 0.12))
+
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 20, ry + 10),
+			str(sd.get("symbol", "?")), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, row_col)
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 60, ry + 6),
+			str(sd.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 140, ry + 6),
+			str(sd.get("pop", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.8, 0.8))
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 220, ry + 6),
+			str(sd.get("stone", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.65, 0.55))
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 300, ry + 6),
+			str(sd.get("fish", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.4, 0.65, 0.8))
+		draw_string(ThemeDB.fallback_font, Vector2(sx + 380, ry + 6),
+			str(sd.get("rooms", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.7, 0.7, 0.5))
 
 
 func _draw_feed(vp_size: Vector2) -> void:
 	var rect := _get_feed_rect(vp_size)
 	var now: int = Time.get_ticks_msec()
-
 	var bg_alpha: float = 0.7 if (_feed_expanded or _feed_hover) else 0.45
 	draw_rect(rect, Color(0.05, 0.05, 0.08, bg_alpha))
 	draw_rect(rect, Color(0.35, 0.35, 0.4, 0.25), false, 1.0)
-
 	var header_text: String = "Events (click to %s)" % ("collapse" if _feed_expanded else "expand")
 	draw_string(ThemeDB.fallback_font, Vector2(rect.position.x + 8, rect.position.y + 22),
 		header_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.55, 0.55, 0.6))
-
 	var msgs: Array = EventFeed.messages
 	if msgs.is_empty():
 		draw_string(ThemeDB.fallback_font, Vector2(rect.position.x + 10, rect.position.y + 52),
 			"No events yet...", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.4, 0.4, 0.4))
 		return
-
 	var visible_count: int = FEED_VISIBLE_COUNT if not _feed_expanded else mini(20, msgs.size())
 	var start_idx: int
 	if _feed_expanded:
@@ -253,7 +481,6 @@ func _draw_feed(vp_size: Vector2) -> void:
 	else:
 		start_idx = maxi(0, msgs.size() - visible_count)
 	var end_idx: int = mini(start_idx + visible_count, msgs.size())
-
 	var y_offset: float = rect.position.y + 32.0
 	for i in range(start_idx, end_idx):
 		var msg: Dictionary = msgs[i]
@@ -266,10 +493,8 @@ func _draw_feed(vp_size: Vector2) -> void:
 		y_offset += FEED_LINE_H
 		draw_string(ThemeDB.fallback_font, Vector2(rect.position.x + 10, y_offset),
 			str(msg["text"]), HORIZONTAL_ALIGNMENT_LEFT, int(FEED_WIDTH - 20), 20, col)
-
 	if _feed_expanded and msgs.size() > visible_count:
-		draw_string(ThemeDB.fallback_font,
-			Vector2(rect.position.x + 8, rect.end.y - 6),
+		draw_string(ThemeDB.fallback_font, Vector2(rect.position.x + 8, rect.end.y - 6),
 			"Scroll for more...", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.45, 0.45, 0.5))
 
 
@@ -285,7 +510,7 @@ func _draw_shop(vp_size: Vector2) -> void:
 	for i in _shop_items.size():
 		var item: Dictionary = _shop_items[i]
 		var iy: float = sy + 50 + i * 70.0
-		var can: bool = Economy.stone >= int(item["cost"])
+		var can: bool = Economy.can_afford(item["id"])
 		var hovered: bool = (i == _hover_idx)
 		var bg_color := Color(0.25, 0.35, 0.2, 0.8) if (hovered and can) else (Color(0.2, 0.25, 0.18, 0.6) if can else Color(0.15, 0.12, 0.12, 0.4))
 		draw_rect(Rect2(sx + 5, iy, sw - 10, 60), bg_color)
@@ -298,6 +523,6 @@ func _draw_shop(vp_size: Vector2) -> void:
 
 
 func _draw_pop_line(x: float, y: float, label: String, count: int, col: Color) -> void:
-	draw_circle(Vector2(x + 8, y - 4), 7.0, col)
-	draw_string(ThemeDB.fallback_font, Vector2(x + 22, y), "%s: %d" % [label, count],
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.8, 0.8, 0.8))
+	draw_circle(Vector2(x + 8, y - 4), 6.0, col)
+	draw_string(ThemeDB.fallback_font, Vector2(x + 20, y), "%s: %d" % [label, count],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.8, 0.8))
