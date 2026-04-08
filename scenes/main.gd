@@ -84,6 +84,7 @@ var faction_count: int = 1
 var map_size: String = "medium"  ## lobby selection passed via FactionManager meta
 var _next_net_id: int = 0
 var _villager_name_counter: Dictionary = {}  ## color -> next number
+var _tutorial_enemies_killed: int = 0  ## Track for tutorial phase skip-ahead
 
 
 func _gen_villager_name(color_id: String) -> String:
@@ -433,6 +434,15 @@ func _process(delta: float) -> void:
 		wall_data.append({"room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": w.is_open})
 
 	_process_red_door_breaking()
+	if TutorialManager.active:
+		var tut_state := {}
+		var doors_open: Array = []
+		for w in walls:
+			if w.is_door:
+				doors_open.append(w.is_open)
+		tut_state["doors_open"] = doors_open
+		tut_state["enemies_killed"] = _tutorial_enemies_killed
+		TutorialManager.check_conditions(tut_state)
 	InfluenceManager.process_influence(room_villagers, wall_data, delta)
 	RoomOwnership.process_ownership(room_villagers, room_enemies, delta)
 	_update_hud()
@@ -1324,9 +1334,11 @@ func _process_red_hunger(delta: float) -> void:
 				if v.health <= 0.0:
 					starving.append(v)
 	for v in starving:
+		var dead_fid: int = v.faction_id
 		villagers.erase(v)
 		v.start_death_animation()
 		EventFeed.push("A red villager starved to death.", Color(0.85, 0.3, 0.25))
+		_check_survival_color_recovery("red", dead_fid)
 
 
 # ==============================================================================
@@ -1350,9 +1362,12 @@ func _process_enemy_attacks(_delta: float) -> void:
 				if result == "kill" and v not in dead:
 					dead.append(v)
 	for v in dead:
+		var dead_color: String = str(v.color_type)
+		var dead_fid: int = v.faction_id
 		villagers.erase(v)
-		EventFeed.push("A %s villager was killed by an enemy." % str(v.color_type), Color(0.8, 0.25, 0.2))
+		EventFeed.push("A %s villager was killed by an enemy." % dead_color, Color(0.8, 0.25, 0.2))
 		v.queue_free()
+		_check_survival_color_recovery(dead_color, dead_fid)
 
 
 func _process_night_enemy_attacks(_delta: float) -> void:
@@ -1375,9 +1390,12 @@ func _process_night_enemy_attacks(_delta: float) -> void:
 				dead_v.append(v)
 
 	for v in dead_v:
+		var dead_color: String = str(v.color_type)
+		var dead_fid: int = v.faction_id
 		villagers.erase(v)
 		EventFeed.push("A villager was lost in the night.", Color(0.6, 0.3, 0.5))
 		v.queue_free()
+		_check_survival_color_recovery(dead_color, dead_fid)
 	for pos in to_convert:
 		_spawn_night_enemy("zombie", pos)
 	for ne in dead_ne:
@@ -1414,6 +1432,7 @@ func _process_red_shooting() -> void:
 			v.shoot_target_enemy = null
 			if killed and target not in dead_enemies:
 				dead_enemies.append(target)
+				_tutorial_enemies_killed += 1
 				TutorialManager.on_enemy_killed()
 	for e in dead_enemies:
 		if e in enemies:
@@ -1422,9 +1441,12 @@ func _process_red_shooting() -> void:
 			night_enemies.erase(e)
 		e.die()
 	for v in dead_villagers:
+		var dead_color: String = str(v.color_type)
+		var dead_fid: int = v.faction_id
 		villagers.erase(v)
-		EventFeed.push("A %s villager was killed in combat." % str(v.color_type), Color(0.9, 0.3, 0.3))
+		EventFeed.push("A %s villager was killed in combat." % dead_color, Color(0.9, 0.3, 0.3))
 		v.start_death_animation()
+		_check_survival_color_recovery(dead_color, dead_fid)
 
 
 # ==============================================================================
@@ -1784,7 +1806,7 @@ func _on_villager_shifted(villager, old_color, new_color, spawn_count, faction_o
 	TutorialManager.on_shift(str(old_color), str(new_color), int(spawn_count))
 
 	# Data-driven extra spawns with population-based probability scaling
-	var dupe_chance: float = _get_dupe_chance(villager.faction_id)
+	var dupe_chance: float = 1.0 if TutorialManager.active else _get_dupe_chance(villager.faction_id)
 	for i in range(int(spawn_count) - 1):
 		if GameRNG.randf() > dupe_chance:
 			continue  # Pop cap reduces duplication
@@ -2266,6 +2288,72 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		if walls[i].is_open != should_open:
 			walls[i].is_open = should_open
 			walls[i].queue_redraw()
+
+
+# ==============================================================================
+# SURVIVAL MODE — COLOR RECOVERY
+# ==============================================================================
+
+func _check_survival_color_recovery(dead_color: String, dead_faction_id: int) -> void:
+	## In survival mode, if a color has 0 remaining villagers for a faction,
+	## convert the nearest valid villager from another color (count > 1) to the missing color.
+	if FactionManager.game_mode != "survival":
+		return
+	if dead_faction_id < 0:
+		return
+	if dead_color not in ["red", "yellow", "blue"]:
+		return
+
+	# Count remaining of this color
+	var remaining: int = 0
+	for v in villagers:
+		if is_instance_valid(v) and v.visible and str(v.color_type) == dead_color and v.faction_id == dead_faction_id:
+			remaining += 1
+	if remaining > 0:
+		return  # Still have some, no recovery needed
+
+	# Count all colors for this faction
+	var color_counts: Dictionary = {}  # color -> count
+	for v in villagers:
+		if not is_instance_valid(v) or not v.visible:
+			continue
+		if v.faction_id != dead_faction_id:
+			continue
+		var ct: String = str(v.color_type)
+		if ct in ["red", "yellow", "blue"]:
+			color_counts[ct] = color_counts.get(ct, 0) + 1
+
+	# Find a donor color with count > 1
+	var best_v: Node = null
+	var best_d: float = INF
+	# We need a dead villager position — use the faction's core room center as fallback
+	var ref_pos: Vector2 = Vector2.ZERO
+	var core_rid: int = FactionManager.get_core_room(dead_faction_id)
+	if room_map.has(core_rid):
+		ref_pos = room_map[core_rid].get_rect().get_center()
+
+	for v in villagers:
+		if not is_instance_valid(v) or not v.visible:
+			continue
+		if v.faction_id != dead_faction_id:
+			continue
+		var ct: String = str(v.color_type)
+		if ct == dead_color or ct not in ["red", "yellow", "blue"]:
+			continue
+		if color_counts.get(ct, 0) <= 1:
+			continue  # Can't take from a color with only 1
+		var d: float = v.global_position.distance_to(ref_pos) if ref_pos != Vector2.ZERO else 0.0
+		if d < best_d:
+			best_d = d
+			best_v = v
+
+	if best_v:
+		var old_ct: String = str(best_v.color_type)
+		best_v.set_color_type(dead_color)
+		if dead_color == "red":
+			best_v._satiation_timer = best_v.SATIATION_PER_LEVEL[1]
+			best_v.is_fed = true
+		EventFeed.push("A %s villager became %s to preserve color access!" % [old_ct, dead_color], Color(0.9, 0.7, 0.3))
 
 
 # ==============================================================================

@@ -17,10 +17,10 @@ const DOOR_SIZE := 120.0
 # size_index: 0=small, 1=medium, 2=large, 3=xl
 const SIZE_NAMES := ["small", "medium", "large", "xl"]
 const GRID_CONFIG := {
-	1: [[6, 4], [8, 6], [10, 7], [14, 10]],
-	2: [[7, 5], [9, 6], [11, 8], [14, 11]],
-	4: [[8, 6], [10, 7], [12, 9], [15, 11]],
-	8: [[10, 7], [12, 8], [14, 10], [16, 12]],
+	1: [[8, 6], [12, 8], [14, 10], [14, 10]],
+	2: [[9, 7], [13, 9], [15, 11], [14, 11]],
+	4: [[10, 8], [14, 10], [16, 12], [15, 11]],
+	8: [[12, 9], [16, 11], [18, 13], [16, 12]],
 }
 
 # Room types
@@ -1118,6 +1118,7 @@ func _spawn_colorless(containers: Dictionary, scenes: Dictionary, center: Vector
 # ==============================================================================
 
 func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> void:
+	var is_survival: bool = (FactionManager.game_mode == "survival")
 	for fi in FACTION_STARTS.size():
 		var start: Dictionary = FACTION_STARTS[fi]
 		var core_id: int = start["home_room"]
@@ -1136,11 +1137,23 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 		var hcenter: Vector2 = hpos + hsize * 0.5
 		var margin: float = 150.0
 
-		var color_defs: Array = [
-			{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
-			{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
-			{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
-		]
+		var color_defs: Array
+		if is_survival:
+			# Survival: 5 villagers (2R, 2Y, 1B), no orb
+			color_defs = [
+				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
+				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin + 60, hpos.y + margin + 40)},
+				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
+				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin - 60, hpos.y + margin + 40)},
+				{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
+			]
+		else:
+			# Standard: 3 villagers + orb
+			color_defs = [
+				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
+				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
+				{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
+			]
 		for cd in color_defs:
 			var v = scenes["villager"].instantiate()
 			containers["villagers"].add_child(v)
@@ -1150,10 +1163,11 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 				v._satiation_timer = v.SATIATION_PER_LEVEL[1]
 				v.is_fed = true
 
-		var orb = scenes["villager"].instantiate()
-		containers["villagers"].add_child(orb)
-		orb.setup("magic_orb", hcenter)
-		orb.faction_id = _faction_id_map[fi]
+		if not is_survival:
+			var orb = scenes["villager"].instantiate()
+			containers["villagers"].add_child(orb)
+			orb.setup("magic_orb", hcenter)
+			orb.faction_id = _faction_id_map[fi]
 
 		if not stone_rd.is_empty():
 			var spos: Vector2 = room_pixel_pos(stone_rd["col"], stone_rd["row"])

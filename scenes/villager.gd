@@ -264,6 +264,14 @@ func _check_command() -> bool:
 				command_mode = "none"
 				_arrived = true
 			return true
+		"break_door":
+			_brain_state = "command_move"
+			_set_target(command_target)
+			# Clear when close enough (main.gd will handle the actual break)
+			if global_position.distance_to(command_target) < radius + 40.0:
+				command_mode = "none"
+				_arrived = true
+			return true
 		"hold":
 			_brain_state = "command_hold"
 			_arrived = true
@@ -317,6 +325,7 @@ func command_release() -> void:
 	clear_command()
 	combat_target = null
 	combat_mode = ""
+	break_door_target = Vector2.ZERO
 
 func command_attack(target: Node) -> void:
 	combat_target = target
@@ -421,7 +430,7 @@ func _set_target_clamped(pos: Vector2) -> void:
 
 func _do_movement(delta: float) -> void:
 	if _arrived: return
-	
+
 	# If we have a doorway waypoint, navigate to it first
 	var effective_target: Vector2 = _move_target
 	if _has_doorway_waypoint:
@@ -429,15 +438,20 @@ func _do_movement(delta: float) -> void:
 		if global_position.distance_to(_doorway_waypoint) < radius + 12.0:
 			_has_doorway_waypoint = false  # reached doorway, continue to real target
 			return
-	
+
+	# Proactive door routing: if target is across a wall, find a door
+	if not _has_doorway_waypoint and _wall_blocks(global_position, effective_target):
+		if _try_find_doorway_redirect(_move_target):
+			return
+		# No accessible door found — slide along wall toward nearest door
+		if _try_slide_toward_nearest_door():
+			return
+		_arrived = true
+		return
+
 	var to_target := effective_target - global_position
 	var dist := to_target.length(); var step := _move_speed * delta
 	if dist <= step or dist < 5.0:
-		if _wall_blocks(global_position, effective_target):
-			if _try_find_doorway_redirect(effective_target):
-				return
-			_arrived = true
-			return
 		global_position = effective_target
 		if _has_doorway_waypoint:
 			_has_doorway_waypoint = false
@@ -447,7 +461,7 @@ func _do_movement(delta: float) -> void:
 	else:
 		var new_pos: Vector2 = global_position + to_target.normalized() * step
 		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract", "command_move"]
-		if cross_room:
+		if cross_room and command_mode != "break_door":
 			if _wall_blocks(global_position, new_pos):
 				if _try_find_doorway_redirect(_move_target):
 					return
@@ -462,7 +476,7 @@ func _do_movement(delta: float) -> void:
 
 
 func _try_find_doorway_redirect(target: Vector2) -> bool:
-	## Find the nearest doorway that would help us reach target. Returns true if found.
+	## Find the nearest open doorway that would help us reach target. Returns true if found.
 	var best_door: Vector2 = Vector2.ZERO
 	var best_score: float = INF
 	for door in brain_doorways:
@@ -479,6 +493,31 @@ func _try_find_doorway_redirect(target: Vector2) -> bool:
 		_doorway_waypoint = best_door
 		_has_doorway_waypoint = true
 		return true
+	return false
+
+
+func _try_slide_toward_nearest_door() -> bool:
+	## When no direct door path is found, move toward the nearest door mid-point.
+	## This handles cases where we're far from a door and need to walk along a wall.
+	var best_door: Vector2 = Vector2.ZERO
+	var best_d: float = INF
+	for door in brain_doorways:
+		var dmid: Vector2 = door["mid"]
+		var d: float = global_position.distance_to(dmid)
+		if d < best_d:
+			best_d = d
+			best_door = dmid
+	if best_d < INF:
+		# Try to find a position we CAN walk to that's closer to the door
+		var dir: Vector2 = (best_door - global_position).normalized()
+		# Try along wall: perpendicular slides
+		for angle_offset in [0.0, 0.5, -0.5, 1.0, -1.0]:
+			var slide_dir: Vector2 = dir.rotated(angle_offset)
+			var test_pos: Vector2 = global_position + slide_dir * 30.0
+			if not _wall_blocks(global_position, test_pos):
+				_doorway_waypoint = test_pos
+				_has_doorway_waypoint = true
+				return true
 	return false
 
 

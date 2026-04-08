@@ -1,18 +1,7 @@
 extends Node
 ## Manages the optional guided tutorial.
-## Phases teach real mechanics one at a time via event hooks from main.gd.
-## The tutorial map uses the real gameplay simulation — only objective tracking
-## and guidance text are tutorial-specific.
-##
-## Phases:
-##   1 - Select & Move: click a villager, right-click to move
-##   2 - Color Shifting: drag/walk a villager near the orb to shift
-##   3 - Yellow Duplication: shift a red → spawns 2 yellows (real mechanic)
-##   4 - Yellow Stone Collection: yellow picks up stone and deposits at bank
-##   5 - Blue Fish Collection: blue picks up fish and delivers to hut
-##   6 - Break a Door: red villager breaks the closed door to Room B
-##   7 - Kill an Enemy: red villager kills an enemy in Room B
-##   8 - Complete: tutorial done
+## The tutorial is a small sandbox with real gameplay — only objective tracking
+## and guidance text are tutorial-specific. Phases auto-skip if condition already met.
 
 signal phase_completed(phase: int)
 signal tutorial_finished()
@@ -24,6 +13,10 @@ var current_phase: int = 0
 var tutorial_room_b_id: int = 1
 
 var _has_selected: bool = false
+var _advance_delay: float = 0.0  ## 3s display timer before moving to next phase
+var _pending_advance: bool = false
+
+const PHASE_ADVANCE_DELAY := 3.0
 
 const PHASE_INSTRUCTIONS: Array[String] = [
 	"",  # index 0 unused
@@ -37,100 +30,165 @@ const PHASE_INSTRUCTIONS: Array[String] = [
 	"Phase 8 — Tutorial Complete! Press Escape or click Reset to return to title.",
 ]
 
+const PHASE_COMPLETE_MSG: Array[String] = [
+	"",
+	"Great! You can select and move villagers!",
+	"Color shifted! Each color has different abilities.",
+	"Duplication! Reds spawn 2 yellows when shifted.",
+	"Stone deposited! Yellows gather stone for building.",
+	"Fish delivered! Blues gather fish to feed reds.",
+	"Door broken! Reds can break into new rooms.",
+	"Enemy killed! Reds are your fighters.",
+	"",
+]
+
+
+func _process(delta: float) -> void:
+	if not active:
+		return
+	if _pending_advance:
+		_advance_delay -= delta
+		if _advance_delay <= 0.0:
+			_pending_advance = false
+			_do_advance()
+
 
 func start_tutorial() -> void:
 	active = true
 	current_phase = 1
 	_has_selected = false
+	_pending_advance = false
+	_advance_delay = 0.0
 	EventFeed.push("Tutorial started! Follow the instructions at the top.", Color(0.9, 0.85, 0.5))
 
 
 func skip_tutorial() -> void:
 	active = false
 	current_phase = 0
+	_pending_advance = false
 	tutorial_finished.emit()
 
 
 func get_current_instruction() -> String:
 	if not active or current_phase < 1 or current_phase >= PHASE_INSTRUCTIONS.size():
 		return ""
+	if _pending_advance and current_phase < PHASE_COMPLETE_MSG.size():
+		return PHASE_COMPLETE_MSG[current_phase]
 	return PHASE_INSTRUCTIONS[current_phase]
 
 
 func _advance() -> void:
+	## Start the 3s delay before actually moving to next phase.
+	if _pending_advance:
+		return  # already advancing
+	_pending_advance = true
+	_advance_delay = PHASE_ADVANCE_DELAY
 	phase_completed.emit(current_phase)
+	EventFeed.push(PHASE_COMPLETE_MSG[current_phase] if current_phase < PHASE_COMPLETE_MSG.size() else "Done!", Color(0.5, 0.9, 0.5))
+
+
+func _do_advance() -> void:
+	## Actually move to next phase after delay.
 	current_phase += 1
 	if current_phase >= PHASE_INSTRUCTIONS.size():
-		# Don't deactivate — keep showing phase 8 "complete" message
 		EventFeed.push("Tutorial complete! You know the basics.", Color(0.7, 0.9, 0.6))
 		tutorial_finished.emit()
 		return
 	EventFeed.push(get_current_instruction(), Color(0.9, 0.85, 0.5))
+	# Check if the new phase's condition is already met — auto-skip
+	_check_already_completed()
 
 
 func is_complete() -> bool:
 	return active and current_phase >= PHASE_INSTRUCTIONS.size()
 
 
+## Call from main.gd each frame to check if current phase condition already satisfied.
+## This handles out-of-order completion (e.g. door broken before phase 6).
+func check_conditions(game_state: Dictionary) -> void:
+	if not active or _pending_advance:
+		return
+	match current_phase:
+		6:
+			# Door broken already?
+			var all_open: bool = true
+			for door_open in game_state.get("doors_open", []):
+				if not door_open:
+					all_open = false
+					break
+			if game_state.get("doors_open", []).is_empty():
+				all_open = false
+			if all_open:
+				_advance()
+		7:
+			# Any enemy already dead?
+			if game_state.get("enemies_killed", 0) > 0:
+				_advance()
+
+
+func _check_already_completed() -> void:
+	## Stub — actual condition check happens via check_conditions() from main.gd
+	pass
+
+
 # ── Event hooks ───────────────────────────────────────────────────────────────
 
 func on_villager_selected() -> void:
-	if not active or current_phase != 1:
+	if not active or current_phase != 1 or _pending_advance:
 		return
 	_has_selected = true
 
 
 func on_move_command() -> void:
-	if not active or current_phase != 1:
+	if not active or current_phase != 1 or _pending_advance:
 		return
 	if _has_selected:
 		_advance()
 
 
 func on_shift(old_color: String, _new_color: String, spawn_count: int) -> void:
-	if not active:
+	if not active or _pending_advance:
 		return
 	if current_phase == 2:
 		_advance()
 	elif current_phase == 3:
-		# Red shifts to yellow and spawns 2 (on_shift_spawn_count = 2 for red)
 		if old_color == "red" and spawn_count > 1:
 			_advance()
 
 
 func on_deposit(resource_type: String) -> void:
-	if not active:
+	if not active or _pending_advance:
 		return
 	if current_phase == 4 and resource_type == "stone":
 		_advance()
 
 
 func on_fish_delivered() -> void:
-	if not active:
+	if not active or _pending_advance:
 		return
 	if current_phase == 5:
 		_advance()
 
 
 func on_door_broken() -> void:
-	if not active:
+	if not active or _pending_advance:
 		return
 	if current_phase == 6:
 		_advance()
 
 
 func on_enemy_killed() -> void:
-	if not active:
+	if not active or _pending_advance:
 		return
 	if current_phase == 7:
 		_advance()
 
 
 func on_villager_entered_room(_room_id: int) -> void:
-	pass  # No longer used as a phase trigger
+	pass
 
 
-# ── Stubs: called by main.gd, safe no-ops ────────────────────────────────────
+# ── Stubs ─────────────────────────────────────────────────────────────────────
 
 func on_blue_merge() -> void:
 	pass

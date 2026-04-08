@@ -9,6 +9,7 @@ const FACTION_SYMBOLS: Array[String] = ["$", "@", "?", "¥", "£", "€", "#", "
 var factions: Dictionary = {}  # faction_id -> FactionData
 var local_faction_id: int = LOCAL_FACTION_ID
 var max_population: int = 50  ## Per-faction max pop, set from lobby
+var game_mode: String = "standard"  ## "standard" or "survival"
 
 
 func _ready() -> void:
@@ -83,4 +84,5 @@ func get_effective_max_pop(faction_id: int, rooms_controlled: int, total_claimab
 
 func clear() -> void:
 	factions.clear()
+	game_mode = "standard"
 	register_faction(LOCAL_FACTION_ID, "Player", Color(1, 1, 1))

@@ -622,21 +622,33 @@ func _draw_tutorial_overlay(vp_size: Vector2) -> void:
 	var box_h: float = 62.0
 	var box_x: float = (vp_size.x - box_w) * 0.5
 	var box_y: float = BAR_HEIGHT + 8.0
-	draw_rect(Rect2(box_x, box_y, box_w, box_h), Color(0.0, 0.0, 0.0, 0.78))
-	draw_rect(Rect2(box_x, box_y, box_w, box_h), Color(0.9, 0.85, 0.4, 0.6), false, 1.5)
+	# Pending advance = green flash
+	var bg_col := Color(0.0, 0.15, 0.0, 0.82) if TutorialManager._pending_advance else Color(0.0, 0.0, 0.0, 0.78)
+	draw_rect(Rect2(box_x, box_y, box_w, box_h), bg_col)
+	var border_col := Color(0.4, 0.9, 0.4, 0.7) if TutorialManager._pending_advance else Color(0.9, 0.85, 0.4, 0.6)
+	draw_rect(Rect2(box_x, box_y, box_w, box_h), border_col, false, 1.5)
 	draw_string(ThemeDB.fallback_font, Vector2(box_x + 14, box_y + 24),
 		instruction, HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 16, Color(0.95, 0.9, 0.7))
+	var phase_max: int = TutorialManager.PHASE_INSTRUCTIONS.size() - 1
 	draw_string(ThemeDB.fallback_font, Vector2(box_x + 14, box_y + 50),
-		"Phase %d / %d  |  Press Escape to skip tutorial" % [TutorialManager.current_phase, TutorialManager.PHASE_INSTRUCTIONS.size() - 1],
+		"Phase %d / %d  |  Press Escape to skip tutorial" % [TutorialManager.current_phase, phase_max],
 		HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 12, Color(0.5, 0.5, 0.5))
-		# Reset button
+	# Reset button
 	var reset_rect := _get_tutorial_reset_rect(vp_size)
 	draw_rect(reset_rect, Color(0.5, 0.15, 0.1, 0.85))
 	draw_rect(reset_rect, Color(0.9, 0.4, 0.3, 0.7), false, 2.0)
-	draw_string(ThemeDB.fallback_font, Vector2(reset_rect.position.x + 16, reset_rect.position.y + 30), "RESET TUTORIAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.9, 0.8))
+	draw_string(ThemeDB.fallback_font, Vector2(reset_rect.position.x + 16, reset_rect.position.y + 30),
+		"RESET TUTORIAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.9, 0.8))
+
+
 func _get_tutorial_reset_rect(vp_size: Vector2) -> Rect2:
 	return Rect2(vp_size.x - 200, BAR_HEIGHT + 14, 170, 44)
 
+
 func _restart_tutorial() -> void:
 	TutorialManager.start_tutorial()
+	call_deferred("_deferred_restart")
+
+
+func _deferred_restart() -> void:
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

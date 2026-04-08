@@ -265,7 +265,8 @@ func command_break_door(target_pos: Vector2) -> void:
 		for nid in red_ids:
 			for v in selected_villagers:
 				if is_instance_valid(v) and v.net_id == nid:
-					v.command_move_to(target_pos)
+					v.command_mode = "break_door"
+					v.command_target = target_pos
 					v.break_door_target = target_pos
 	EventFeed.push("Red sent to break door.", Color(0.9, 0.5, 0.3))
 

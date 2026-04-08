@@ -8,6 +8,7 @@ var player_count: int = 2
 var max_pop: int = 300
 var map_seed_text: String = ""
 var map_size: String = "medium"  ## "small", "medium", "large", "xl"
+var game_mode: String = "standard"  ## "standard" or "survival"
 var _hover: String = ""
 
 const MAP_SIZES: Array[String] = ["small", "medium", "large", "xl"]
@@ -123,6 +124,8 @@ func _handle_click(elem: String) -> void:
 					return
 				if elem.begins_with("map_size_"):
 					map_size = elem.substr(9)
+				if elem == "toggle_game_mode":
+					game_mode = "survival" if game_mode == "standard" else "standard"
 
 	elif _state == "waiting_host":
 		if elem == "launch":
@@ -166,6 +169,7 @@ func _on_start_pressed() -> void:
 			FactionManager.clear()
 			FactionManager.register_faction(solo_fid, FACTION_NAMES[solo_fid], FACTION_COLORS[solo_fid])
 			FactionManager.local_faction_id = solo_fid
+			FactionManager.game_mode = game_mode
 			_set_game_config(1)
 			SaveManager.delete_save()
 			get_tree().change_scene_to_file("res://scenes/main.tscn")
@@ -303,8 +307,11 @@ func _get_solo_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	# Seed field
 	var seed_y: float = top + 200
 	if Rect2(cx + 10, seed_y - 2, 160, 28).has_point(pos): return "field_seed"
+	# Game Mode toggle
+	var gm_y: float = top + 250
+	if Rect2(cx + 10, gm_y - 2, 160, 28).has_point(pos): return "toggle_game_mode"
 	# Faction picker
-	var fy: float = top + 260
+	var fy: float = top + 310
 	for i in MAX_FACTIONS:
 		if Rect2(cx - 140 + i * 38, fy, 32, 32).has_point(pos): return "solo_f_%d" % i
 	# Start
@@ -430,8 +437,22 @@ func _draw_solo_config(vp: Vector2, cx: float, top: float) -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, seed_y + 16), sd + cur,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if map_seed_text != "" else Color(0.45, 0.45, 0.45))
 
+	# Game Mode toggle
+	var gm_y: float = top + 250
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, gm_y + 18), "Game Mode:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	var gm_hovered: bool = (_hover == "toggle_game_mode")
+	var gm_is_survival: bool = (game_mode == "survival")
+	var gm_bg: Color = Color(0.5, 0.2, 0.15, 0.9) if gm_is_survival else Color(0.15, 0.3, 0.2, 0.9)
+	if gm_hovered: gm_bg = gm_bg.lightened(0.15)
+	draw_rect(Rect2(cx + 10, gm_y - 2, 160, 28), gm_bg)
+	draw_rect(Rect2(cx + 10, gm_y - 2, 160, 28), Color(0.5, 0.5, 0.5, 0.5), false, 1.0)
+	var gm_label: String = "Survival (No Orb)" if gm_is_survival else "Standard (Orb)"
+	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, gm_y + 16), gm_label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7))
+
 	# Faction picker
-	var fy: float = top + 260
+	var fy: float = top + 310
 	var solo_fid: int = NetworkManager.synced_peer_factions.get(1, 0)
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fy - 6), "Faction:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.55, 0.55, 0.6))

@@ -210,6 +210,20 @@ func _trigger_shift(v: Node) -> void:
 	var spawn_count: int = def.get("on_shift_spawn_count", 1)
 	if new_color.is_empty():
 		v.shift_meter = 0.0; return
+
+	# Survival mode: block shift if this is the last villager of its color for its faction
+	if FactionManager.game_mode == "survival" and old_color in ["red", "yellow", "blue"] and v.faction_id >= 0:
+		var count_same: int = 0
+		for other in get_tree().get_nodes_in_group("villagers") if v.is_in_group("villagers") else []:
+			if is_instance_valid(other) and str(other.color_type) == old_color and other.faction_id == v.faction_id:
+				count_same += 1
+		# Fallback: count via brute force if not in group (villagers aren't in groups currently)
+		if count_same == 0:
+			count_same = _count_color_for_faction(old_color, v.faction_id)
+		if count_same <= 1:
+			v.shift_meter = 0.0
+			return  # Protected: last of color
+
 	v.shift_meter = 0.0
 	# For colorless: pass the faction of the dominant influencer
 	var faction_override: int = v.faction_id
@@ -217,6 +231,18 @@ func _trigger_shift(v: Node) -> void:
 		# _dominant_influencer_faction is set during group processing
 		faction_override = v.get("_dominant_influencer_faction") if v.get("_dominant_influencer_faction") != null else v.faction_id
 	villager_shifted.emit(v, old_color, new_color, spawn_count, faction_override)
+
+
+func _count_color_for_faction(color: String, faction_id: int) -> int:
+	## Count visible villagers of a color for a faction. Uses scene tree traversal.
+	var count: int = 0
+	var villager_container = get_tree().current_scene.get_node_or_null("Villagers")
+	if villager_container == null:
+		return 0
+	for v in villager_container.get_children():
+		if is_instance_valid(v) and v.visible and str(v.color_type) == color and v.get("faction_id") == faction_id:
+			count += 1
+	return count
 
 
 func process_building_group(villagers: Array, delta: float) -> void:
