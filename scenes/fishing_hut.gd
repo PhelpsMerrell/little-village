@@ -1,18 +1,18 @@
 extends Node2D
 ## Fishing hut where blues deposit collected fish.
-## Works like the stone bank but for fish resource.
+## Placed once — not draggable. Blues walk here to deposit.
 
 const DEPOSIT_RADIUS := 70.0
 
 @onready var _area: Area2D = $InputArea
 
-var _dragging := false
-var _drag_offset := Vector2.ZERO
 var _deposits: int = 0
+var placed_by_faction: int = -1  ## -2 = pre-placed (not sellable), >= 0 = player-placed
+var is_selected: bool = false
 
 
 func _ready() -> void:
-	_area.input_event.connect(_on_area_input)
+	pass
 
 
 func try_deposit(villager: Node) -> bool:
@@ -30,20 +30,20 @@ func try_deposit(villager: Node) -> bool:
 	return false
 
 
-func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		_dragging = true
-		_drag_offset = global_position - get_global_mouse_position()
-		z_index = 10
+func evict_all() -> void:
+	pass
 
-func _input(event: InputEvent) -> void:
-	if not _dragging:
-		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		_dragging = false
-		z_index = 0
-	elif event is InputEventMouseMotion:
-		global_position = get_global_mouse_position() + _drag_offset
+
+func get_capacity() -> int:
+	return 0
+
+
+func get_sheltered_count() -> int:
+	return 0
+
+
+func is_full() -> bool:
+	return false
 
 
 func _process(_delta: float) -> void:
@@ -74,3 +74,8 @@ func _draw() -> void:
 	# Radius hint
 	draw_arc(Vector2.ZERO, DEPOSIT_RADIUS, 0.0, TAU, 32,
 		Color(0.3, 0.5, 0.7, 0.12), 1.0, true)
+
+	# Selection ring
+	if is_selected:
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
+		draw_arc(Vector2.ZERO, 60.0, 0.0, TAU, 24, Color(1.0, 0.9, 0.5, pulse), 2.5, true)

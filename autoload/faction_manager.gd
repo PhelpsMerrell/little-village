@@ -21,7 +21,9 @@ func register_faction(id: int, faction_name: String, faction_color: Color) -> vo
 		"id": id,
 		"name": faction_name,
 		"color": faction_color,
-		"player_ids": [],  # for multiplayer: which players control this faction
+		"player_ids": [],
+		"eliminated": false,
+		"core_room_id": -1,
 	}
 
 
@@ -51,6 +53,32 @@ func is_local_faction(faction_id: int) -> bool:
 
 func get_all_faction_ids() -> Array:
 	return factions.keys()
+
+
+func set_core_room(faction_id: int, room_id: int) -> void:
+	if factions.has(faction_id):
+		factions[faction_id]["core_room_id"] = room_id
+
+
+func get_core_room(faction_id: int) -> int:
+	return factions.get(faction_id, {}).get("core_room_id", -1)
+
+
+func is_eliminated(faction_id: int) -> bool:
+	return factions.get(faction_id, {}).get("eliminated", false)
+
+
+func eliminate_faction(faction_id: int) -> void:
+	if factions.has(faction_id):
+		factions[faction_id]["eliminated"] = true
+
+
+func get_effective_max_pop(faction_id: int, rooms_controlled: int, total_claimable: int) -> int:
+	if total_claimable <= 0:
+		return max_population
+	var min_floor: int = maxi(3, int(floor(float(max_population) * 0.05)))
+	var scaled: int = int(floor(float(rooms_controlled) / float(total_claimable) * float(max_population)))
+	return clampi(scaled, min_floor, max_population)
 
 
 func clear() -> void:

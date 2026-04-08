@@ -20,7 +20,9 @@ var _shop: Dictionary = {}
 
 func _ready() -> void:
 	register_shop_item("house", 5, "House", "Shelters 4 villagers at night")
-	register_shop_item("church", 50, "Church", "Blues heal / 8 shelter at night")
+	register_shop_item("fishing_hut", 7, "Fishing Hut", "Blues deposit fish here")
+	register_shop_item("bank", 7, "Bank", "Yellows deposit stone here")
+	register_shop_item("church", 10, "Church", "Blues heal / 8 shelter at night")
 
 
 func _ensure_faction(fid: int) -> void:
@@ -56,6 +58,12 @@ func register_shop_item(id: String, cost: int, display_name: String, desc: Strin
 
 func get_shop_items() -> Dictionary:
 	return _shop
+
+
+func get_sell_value(item_id: String) -> int:
+	if not _shop.has(item_id):
+		return 0
+	return int(floor(float(_shop[item_id]["cost"]) / 2.0))
 
 
 func add_stone(amount: int = 1, fid: int = -1) -> void:

@@ -8,6 +8,7 @@ var selected_villagers: Array = []
 var _selected_resource: Node = null
 var _selected_resource_type: String = ""
 var selected_building: Node = null  ## Currently selected building (home or church)
+var pending_combat_mode: String = ""  ## "attack" or "stun", set by HUD combat buttons
 
 
 func _get_selected_net_ids() -> Array:
@@ -24,6 +25,7 @@ func select_villager(v: Node, additive: bool = false) -> void:
 	if v not in selected_villagers:
 		selected_villagers.append(v)
 		v.is_selected = true
+	TutorialManager.on_villager_selected()
 
 
 func deselect_villager(v: Node) -> void:
@@ -66,6 +68,9 @@ func has_building_selection() -> bool:
 func command_move_to(target_pos: Vector2) -> void:
 	if selected_villagers.is_empty():
 		return
+	if FactionManager.is_eliminated(faction_id):
+		return
+	TutorialManager.on_move_command()
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
 			"type": "move_to",
@@ -82,6 +87,8 @@ func command_move_to(target_pos: Vector2) -> void:
 
 func command_hold() -> void:
 	if selected_villagers.is_empty():
+		return
+	if FactionManager.is_eliminated(faction_id):
 		return
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
@@ -101,6 +108,8 @@ func command_hold() -> void:
 func command_release() -> void:
 	if selected_villagers.is_empty():
 		return
+	if FactionManager.is_eliminated(faction_id):
+		return
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
 			"type": "release",
@@ -115,6 +124,8 @@ func command_release() -> void:
 
 func command_enter_exit_house(homes: Array, churches: Array) -> void:
 	if selected_villagers.is_empty():
+		return
+	if FactionManager.is_eliminated(faction_id):
 		return
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
@@ -159,6 +170,8 @@ func command_enter_exit_house(homes: Array, churches: Array) -> void:
 
 
 func try_click_villager(click_pos: Vector2, villagers: Array, shift_held: bool) -> bool:
+	if FactionManager.is_eliminated(faction_id):
+		return false
 	var clicked_villager: Node = null
 	var best_d: float = INF
 	for v in villagers:
@@ -211,6 +224,8 @@ func has_resource_selection() -> bool:
 
 func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Callable) -> bool:
 	## Try to select a building. Any building owned by local faction is selectable.
+	if FactionManager.is_eliminated(faction_id):
+		return false
 	var best_b: Node = null
 	var best_d: float = INF
 	for b in buildings:
@@ -229,6 +244,8 @@ func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Calla
 func command_break_door(target_pos: Vector2) -> void:
 	## Send break-door command for selected red villagers.
 	if selected_villagers.is_empty():
+		return
+	if FactionManager.is_eliminated(faction_id):
 		return
 	var red_ids: Array = []
 	for v in selected_villagers:
@@ -251,3 +268,58 @@ func command_break_door(target_pos: Vector2) -> void:
 					v.command_move_to(target_pos)
 					v.break_door_target = target_pos
 	EventFeed.push("Red sent to break door.", Color(0.9, 0.5, 0.3))
+
+
+func command_attack_target(target: Node) -> void:
+	## Send attack command to all selected red villagers.
+	if selected_villagers.is_empty() or FactionManager.is_eliminated(faction_id):
+		return
+	var red_ids: Array = []
+	for v in selected_villagers:
+		if is_instance_valid(v) and str(v.color_type) == "red":
+			red_ids.append(v.net_id)
+	if red_ids.is_empty():
+		return
+	if NetworkManager.is_online() and not NetworkManager.is_authority():
+		NetworkManager.send_command({
+			"type": "attack",
+			"net_ids": red_ids,
+			"target_net_id": target.net_id,
+		})
+	else:
+		for v in selected_villagers:
+			if is_instance_valid(v) and str(v.color_type) == "red":
+				v.command_attack(target)
+	pending_combat_mode = ""
+	EventFeed.push("Red attacking!", Color(0.9, 0.3, 0.2))
+
+
+func command_stun_target(target: Node) -> void:
+	## Send stun command to all selected blue villagers.
+	if selected_villagers.is_empty() or FactionManager.is_eliminated(faction_id):
+		return
+	var blue_ids: Array = []
+	for v in selected_villagers:
+		if is_instance_valid(v) and str(v.color_type) == "blue":
+			blue_ids.append(v.net_id)
+	if blue_ids.is_empty():
+		return
+	if NetworkManager.is_online() and not NetworkManager.is_authority():
+		NetworkManager.send_command({
+			"type": "stun",
+			"net_ids": blue_ids,
+			"target_net_id": target.net_id,
+		})
+	else:
+		for v in selected_villagers:
+			if is_instance_valid(v) and str(v.color_type) == "blue":
+				v.command_stun(target)
+	pending_combat_mode = ""
+	EventFeed.push("Blue stunning!", Color(0.3, 0.5, 0.9))
+
+
+func has_selected_color(color: String) -> bool:
+	for v in selected_villagers:
+		if is_instance_valid(v) and str(v.color_type) == color:
+			return true
+	return false

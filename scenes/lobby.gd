@@ -7,13 +7,18 @@ extends Control
 var player_count: int = 2
 var max_pop: int = 300
 var map_seed_text: String = ""
+var map_size: String = "medium"  ## "small", "medium", "large", "xl"
 var _hover: String = ""
+
+const MAP_SIZES: Array[String] = ["small", "medium", "large", "xl"]
+const MAP_SIZE_LABELS: Array[String] = ["Small", "Medium", "Large", "XL"]
 
 var net_mode: String = "solo"
 var join_address: String = "localhost"
 
 ## Lobby state: "config", "waiting_host", "waiting_client"
 var _state: String = "config"
+var _scene_changing: bool = false
 
 ## Which text field is active for typing: "seed", "address", or ""
 var _typing_field: String = ""
@@ -113,7 +118,11 @@ func _handle_click(elem: String) -> void:
 			_:
 				if elem.begins_with("solo_f_"):
 					var fi: int = int(elem.substr(7))
+					## Solo-only: direct local write is correct here (no network, no lobby)
 					NetworkManager.synced_peer_factions[1] = fi
+					return
+				if elem.begins_with("map_size_"):
+					map_size = elem.substr(9)
 
 	elif _state == "waiting_host":
 		if elem == "launch":
@@ -125,11 +134,18 @@ func _handle_click(elem: String) -> void:
 			NetworkManager.send_ready_toggle()
 		elif elem.begins_with("wh_pf_"):
 			var idx: int = int(elem.substr(6))
-			var all_p: Array[int] = NetworkManager.get_all_peer_ids()
-			if idx >= 0 and idx < all_p.size():
-				var pid: int = all_p[idx]
+			var sorted_peers: Array[int] = NetworkManager.get_peers_sorted_by_slot()
+			if idx >= 0 and idx < sorted_peers.size():
+				var pid: int = sorted_peers[idx]
 				var cur: int = NetworkManager.synced_peer_factions.get(pid, 0)
-				NetworkManager.synced_peer_factions[pid] = (cur + 1) % MAX_FACTIONS
+				var next_fid: int = (cur + 1) % MAX_FACTIONS
+				if pid == NetworkManager.get_my_peer_id():
+					# Host changing their own faction — use the broadcast path
+					NetworkManager.send_faction_choice(next_fid)
+				else:
+					# Host changing another player's faction — host has authority to do this directly
+					NetworkManager.synced_peer_factions[pid] = next_fid
+					NetworkManager._broadcast_lobby_state()
 
 	elif _state == "waiting_client":
 		if elem == "cancel":
@@ -161,7 +177,7 @@ func _on_start_pressed() -> void:
 			NetworkManager.synced_peer_factions[1] = NetworkManager.synced_peer_factions.get(1, 0)
 			NetworkManager.synced_faction_count = MAX_FACTIONS
 			var seed_val: int = hash(map_seed_text) if map_seed_text != "" else -1
-			NetworkManager.broadcast_lobby_config(seed_val, MAX_FACTIONS, NetworkManager.synced_peer_factions, max_pop)
+			NetworkManager.broadcast_lobby_config(seed_val, MAX_FACTIONS, NetworkManager.synced_peer_factions, max_pop, map_size)
 			_state = "waiting_host"
 		"join":
 			var err := NetworkManager.join_game(join_address)
@@ -186,16 +202,16 @@ func _launch_game() -> void:
 	FactionManager.max_population = max_pop
 	_set_game_config(fcount)
 	NetworkManager.broadcast_lobby_config(
-		hash(map_seed_text) if map_seed_text != "" else -1,
-		fcount, pfmap, max_pop)
+	hash(map_seed_text) if map_seed_text != "" else -1,
+	fcount, pfmap, max_pop, map_size)
 	NetworkManager.broadcast_start_game()
 	SaveManager.delete_save()
-	call_deferred("_deferred_change_to_main")
 
 
 func _on_game_started() -> void:
-	if not is_inside_tree():
+	if not is_inside_tree() or _scene_changing:
 		return
+	_scene_changing = true
 	FactionManager.clear()
 	var used: Dictionary = {}
 	for pid in NetworkManager.synced_peer_factions:
@@ -210,6 +226,7 @@ func _on_game_started() -> void:
 	FactionManager.set_meta("faction_count", NetworkManager.synced_faction_count)
 	FactionManager.set_meta("player_count", NetworkManager.get_all_peer_ids().size())
 	FactionManager.set_meta("peer_factions", NetworkManager.synced_peer_factions.duplicate())
+	FactionManager.set_meta("map_size", NetworkManager.synced_map_size)
 	SaveManager.delete_save()
 	call_deferred("_deferred_change_to_main")
 
@@ -231,6 +248,7 @@ func _set_game_config(fcount: int) -> void:
 	FactionManager.set_meta("map_seed", seed_val)
 	FactionManager.set_meta("player_count", player_count)
 	FactionManager.set_meta("faction_count", fcount)
+	FactionManager.set_meta("map_size", map_size)
 	FactionManager.max_population = max_pop
 
 
@@ -278,11 +296,15 @@ func _get_solo_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	# Max Pop
 	if Rect2(cx + 60, row_y - 4, 40, 32).has_point(pos): return "maxpop_up"
 	if Rect2(cx + 110, row_y - 4, 40, 32).has_point(pos): return "maxpop_down"
+	# Map Size
+	var ms_y: float = top + 150
+	for i in MAP_SIZES.size():
+		if Rect2(cx + 10 + i * 52, ms_y - 2, 46, 28).has_point(pos): return "map_size_%s" % MAP_SIZES[i]
 	# Seed field
-	var seed_y: float = top + 150
+	var seed_y: float = top + 200
 	if Rect2(cx + 10, seed_y - 2, 160, 28).has_point(pos): return "field_seed"
 	# Faction picker
-	var fy: float = top + 210
+	var fy: float = top + 260
 	for i in MAX_FACTIONS:
 		if Rect2(cx - 140 + i * 38, fy, 32, 32).has_point(pos): return "solo_f_%d" % i
 	# Start
@@ -299,8 +321,12 @@ func _get_host_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	row_y = top + 145
 	if Rect2(cx + 60, row_y - 4, 40, 32).has_point(pos): return "maxpop_up"
 	if Rect2(cx + 110, row_y - 4, 40, 32).has_point(pos): return "maxpop_down"
+	# Map Size
+	var ms_y: float = top + 195
+	for i in MAP_SIZES.size():
+		if Rect2(cx + 10 + i * 52, ms_y - 2, 46, 28).has_point(pos): return "map_size_%s" % MAP_SIZES[i]
 	# Seed
-	var seed_y: float = top + 200
+	var seed_y: float = top + 250
 	if Rect2(cx + 10, seed_y - 2, 160, 28).has_point(pos): return "field_seed"
 	# Start
 	if Rect2(cx - 100, vp.y - 100, 200, 50).has_point(pos): return "start"
@@ -320,13 +346,13 @@ func _get_waiting_element(pos: Vector2, vp: Vector2, cx: float, is_host_view: bo
 	if is_host_view and NetworkManager.are_all_ready():
 		if Rect2(cx - 100, vp.y - 100, 200, 50).has_point(pos): return "launch"
 	if Rect2(cx - 100, vp.y - 170, 200, 40).has_point(pos): return "cancel"
-	var all_p: Array[int] = NetworkManager.get_all_peer_ids()
-	var rby: float = 150.0 + all_p.size() * 40.0 + 20
+	var sorted_peers: Array[int] = NetworkManager.get_peers_sorted_by_slot()
+	var rby: float = 150.0 + sorted_peers.size() * 40.0 + 20
 	if Rect2(cx - 100, rby, 200, 36).has_point(pos): return "ready"
 	var prefix: String = "wh_pf_" if is_host_view else "wc_pf_"
 	var my_pid: int = NetworkManager.get_my_peer_id()
-	for i in all_p.size():
-		var can_click: bool = is_host_view or (all_p[i] == my_pid)
+	for i in sorted_peers.size():
+		var can_click: bool = is_host_view or (sorted_peers[i] == my_pid)
 		if can_click and Rect2(cx - 20, 150.0 + i * 40.0 - 2, 80, 28).has_point(pos):
 			return "%s%d" % [prefix, i]
 	return ""
@@ -385,8 +411,14 @@ func _draw_solo_config(vp: Vector2, cx: float, top: float) -> void:
 	_draw_btn(cx + 60, row_y - 4, 40, 32, "+", "maxpop_up")
 	_draw_btn(cx + 110, row_y - 4, 40, 32, "-", "maxpop_down")
 
+	# Map Size
+	var ms_y: float = top + 150
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, ms_y + 16), "Map Size:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	_draw_map_size_buttons(cx + 10, ms_y - 2)
+
 	# Seed
-	var seed_y: float = top + 150
+	var seed_y: float = top + 200
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, seed_y + 18), "Map Seed:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
 	var sd: String = map_seed_text if map_seed_text != "" else "(random)"
@@ -399,7 +431,7 @@ func _draw_solo_config(vp: Vector2, cx: float, top: float) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if map_seed_text != "" else Color(0.45, 0.45, 0.45))
 
 	# Faction picker
-	var fy: float = top + 210
+	var fy: float = top + 260
 	var solo_fid: int = NetworkManager.synced_peer_factions.get(1, 0)
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fy - 6), "Faction:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.55, 0.55, 0.6))
@@ -438,8 +470,14 @@ func _draw_host_config(vp: Vector2, cx: float, top: float) -> void:
 	_draw_btn(cx + 60, row_y - 4, 40, 32, "+", "maxpop_up")
 	_draw_btn(cx + 110, row_y - 4, 40, 32, "-", "maxpop_down")
 
+	# Map Size
+	var ms_y: float = top + 195
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, ms_y + 16), "Map Size:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	_draw_map_size_buttons(cx + 10, ms_y - 2)
+
 	# Seed
-	var seed_y: float = top + 200
+	var seed_y: float = top + 250
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, seed_y + 18), "Map Seed:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
 	var sd: String = map_seed_text if map_seed_text != "" else "(random)"
@@ -484,14 +522,15 @@ func _draw_waiting(vp: Vector2, cx: float, is_host_view: bool) -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 100, 80), title,
 		HORIZONTAL_ALIGNMENT_CENTER, -1, 28, Color(0.9, 0.85, 0.6))
 
-	var all_peers: Array[int] = NetworkManager.get_all_peer_ids()
-	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, 120), "%d player(s)" % all_peers.size(),
+	var sorted_peers: Array[int] = NetworkManager.get_peers_sorted_by_slot()
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, 120), "%d player(s)" % sorted_peers.size(),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.5, 0.8, 0.5))
 
 	var list_y: float = 150.0
 	var my_pid: int = NetworkManager.get_my_peer_id()
-	for i in all_peers.size():
-		var pid: int = all_peers[i]
+	for i in sorted_peers.size():
+		var pid: int = sorted_peers[i]
+		var slot: int = NetworkManager.synced_peer_slots.get(pid, i + 1)
 		var fid: int = NetworkManager.synced_peer_factions.get(pid, 0)
 		var is_ready: bool = NetworkManager.synced_peer_ready.get(pid, false)
 		var ry: float = list_y + i * 40.0
@@ -502,7 +541,7 @@ func _draw_waiting(vp: Vector2, cx: float, is_host_view: bool) -> void:
 		if pid == 1: tags += " (Host)"
 		if is_me: tags += " (You)"
 
-		draw_string(ThemeDB.fallback_font, Vector2(cx - 140, ry + 16), "P%d%s" % [i + 1, tags],
+		draw_string(ThemeDB.fallback_font, Vector2(cx - 140, ry + 16), "P%d%s" % [slot, tags],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.9, 0.9, 0.7) if is_me else Color(0.7, 0.7, 0.7))
 
 		var can_click: bool = is_host_view or is_me
@@ -519,7 +558,7 @@ func _draw_waiting(vp: Vector2, cx: float, is_host_view: bool) -> void:
 
 	# Ready button
 	var my_ready: bool = NetworkManager.synced_peer_ready.get(my_pid, false)
-	var rby: float = list_y + all_peers.size() * 40.0 + 20
+	var rby: float = list_y + sorted_peers.size() * 40.0 + 20
 	var rh: bool = (_hover == "ready")
 	var rbg: Color = Color(0.2, 0.4, 0.2, 0.9) if my_ready else (Color(0.25, 0.3, 0.2, 0.85) if rh else Color(0.15, 0.18, 0.12, 0.7))
 	draw_rect(Rect2(cx - 100, rby, 200, 36), rbg)
@@ -548,6 +587,27 @@ func _draw_waiting(vp: Vector2, cx: float, is_host_view: bool) -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(cx - 80, vp.y - 60),
 			"Waiting for host to launch...",
 			HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.4, 0.4, 0.45))
+
+
+func _draw_map_size_buttons(x: float, y: float) -> void:
+	for i in MAP_SIZES.size():
+		var sid: String = "map_size_%s" % MAP_SIZES[i]
+		var selected: bool = (map_size == MAP_SIZES[i])
+		var hovered: bool = (_hover == sid)
+		var bg: Color
+		if selected:
+			bg = Color(0.2, 0.45, 0.55, 0.95)
+		elif hovered:
+			bg = Color(0.18, 0.28, 0.35, 0.85)
+		else:
+			bg = Color(0.1, 0.14, 0.18, 0.7)
+		draw_rect(Rect2(x + i * 52, y, 46, 28), bg)
+		draw_rect(Rect2(x + i * 52, y, 46, 28),
+			Color(0.4, 0.65, 0.75, 0.8) if selected else Color(0.3, 0.3, 0.3, 0.3),
+			false, 1.5 if selected else 1.0)
+		draw_string(ThemeDB.fallback_font, Vector2(x + i * 52 + 6, y + 18),
+			MAP_SIZE_LABELS[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Color(1, 1, 1, 0.95) if selected else (Color(0.85, 0.85, 0.85) if hovered else Color(0.55, 0.55, 0.55)))
 
 
 func _draw_btn(x: float, y: float, w: float, h: float, label: String, elem_id: String) -> void:

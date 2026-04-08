@@ -94,7 +94,7 @@ func _register_defaults() -> void:
 		"influence_targets": ["red", "yellow", "blue", "colorless"],
 		"on_shift_spawn_count": 1,
 		"influence_delivery": "standard",
-		"influence_rate": 2.0,
+		"influence_rate": 4.0,  ## Doubled (was 2.0) to compensate halved BASE_SHIFT_SPEED
 		"stacking_bonus": 0.1,
 		"can_move": false,
 		"special_abilities": [],

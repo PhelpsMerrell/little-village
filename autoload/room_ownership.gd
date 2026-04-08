@@ -16,6 +16,8 @@ var _capture_state: Dictionary = {}
 ## room_id -> int (faction that owns it, -1 = unowned)
 var ownership: Dictionary = {}
 
+signal room_captured(room_id: int, new_owner: int, old_owner: int)
+
 
 func get_room_owner(room_id: int) -> int:
 	return ownership.get(room_id, -1)
@@ -90,10 +92,12 @@ func process_ownership(room_villagers: Dictionary, room_enemies: Dictionary, del
 					EventFeed.push("Room %d neutralized!" % rid, Color(0.7, 0.7, 0.5))
 				else:
 					# Capture!
+					var prev_owner: int = ownership.get(rid, -1)
 					ownership[rid] = fid
 					_capture_state.erase(rid)
 					var sym: String = FactionManager.get_faction_symbol(fid)
 					EventFeed.push("Faction %s captured room %d!" % [sym, rid], FactionManager.get_faction_color(fid))
+					room_captured.emit(rid, fid, prev_owner)
 
 		elif factions_present.size() >= 2:
 			# Contested — freeze timer (don't advance, don't decline)

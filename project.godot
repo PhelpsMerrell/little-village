@@ -30,6 +30,7 @@ FogOfWar="*res://autoload/fog_of_war.gd"
 FactionManager="*res://autoload/faction_manager.gd"
 RoomOwnership="*res://autoload/room_ownership.gd"
 NetworkManager="*res://autoload/network_manager.gd"
+TutorialManager="*res://autoload/tutorial_manager.gd"
 
 [display]
 

@@ -18,13 +18,17 @@ const RED_STARVE_DPS := 2.0
 const DEMON_SPAWN_COUNT := 7
 const ZOMBIE_SPAWN_COUNT := 5
 
-const RIVER_ROOM_ID := 6
 const RIVER_FISH_MAX := 4
 const RIVER_FISH_INTERVAL := 1800.0
 const COLORLESS_ATTRACT_RANGE := 350.0
 
+var _river_room_ids: Array = []  ## populated after map generation
+
 var _river_fish_timer: float = 0.0
 var _dev_fog_off: bool = false
+
+## War state: Set[faction_a][faction_b] = true when those factions have fought
+var _war_state: Dictionary = {}  # faction_id -> Dictionary of {faction_id -> bool}
 
 var rooms: Array = []
 var room_map: Dictionary = {}
@@ -73,9 +77,11 @@ var _options_menu: Control = null
 
 var _player_controller_script: GDScript = preload("res://scenes/player_controller.gd")
 var _map_generator_script: GDScript = preload("res://scenes/map_generator.gd")
+var _map_gen = null  ## MapGenerator instance, kept alive after generate()
 
 var map_seed: int = -1  ## -1 = random, >= 0 = deterministic
 var faction_count: int = 1
+var map_size: String = "medium"  ## lobby selection passed via FactionManager meta
 var _next_net_id: int = 0
 var _villager_name_counter: Dictionary = {}  ## color -> next number
 
@@ -109,7 +115,10 @@ func _ready() -> void:
 	_hud.buy_requested.connect(_on_buy_requested)
 	_hud.command_issued.connect(_on_hud_command)
 	_hud.building_command_issued.connect(_on_hud_building_command)
+	RoomOwnership.room_captured.connect(_on_room_captured)
 	_init_options_menu()
+	if TutorialManager.active:
+		_dev_fog_off = true  # Fog off in tutorial for clarity
 	if SaveManager.has_save():
 		call_deferred("_try_load_save")
 
@@ -121,6 +130,9 @@ func _read_lobby_config() -> void:
 	if FactionManager.has_meta("faction_count"):
 		faction_count = FactionManager.get_meta("faction_count")
 		FactionManager.remove_meta("faction_count")
+	if FactionManager.has_meta("map_size"):
+		map_size = FactionManager.get_meta("map_size")
+		FactionManager.remove_meta("map_size")
 	if FactionManager.has_meta("player_count"):
 		FactionManager.remove_meta("player_count")
 	if FactionManager.has_meta("peer_factions"):
@@ -152,7 +164,7 @@ func _try_load_save() -> void:
 # ==============================================================================
 
 func _generate_map() -> void:
-	var gen = _map_generator_script.new()
+	_map_gen = _map_generator_script.new()
 	var containers := {
 		"rooms": _rooms_container,
 		"walls": _wall_container,
@@ -175,8 +187,18 @@ func _generate_map() -> void:
 		"hut": preload("res://scenes/fishing_hut.tscn"),
 		"river": preload("res://scenes/obstacles/river_obstacle.tscn"),
 	}
-	gen.generate(containers, scenes, map_seed, faction_count)
-	room_map = gen.room_map
+	if TutorialManager.active:
+		_map_gen.generate_tutorial(containers, scenes)
+	else:
+		_map_gen.generate(containers, scenes, map_seed, faction_count, map_size,
+				FactionManager.get_all_faction_ids())
+	room_map = _map_gen.room_map
+	_river_room_ids = _map_gen._river_room_ids.duplicate()
+
+	# Register core rooms using actual faction IDs from the map
+	for fi in _map_gen.FACTION_STARTS.size():
+		var actual_fid: int = _map_gen._faction_id_map[fi]
+		FactionManager.set_core_room(actual_fid, _map_gen.FACTION_STARTS[fi]["home_room"])
 
 
 # ==============================================================================
@@ -184,16 +206,16 @@ func _generate_map() -> void:
 # ==============================================================================
 
 func _init_camera() -> void:
-	var MapGen: GDScript = _map_generator_script
 	# Find home room for local faction
 	var home_rid: int = 0
 	var my_fid: int = FactionManager.local_faction_id
-	if faction_count > 1 and my_fid < MapGen.FACTION_STARTS.size():
-		home_rid = MapGen.FACTION_STARTS[my_fid]["home_room"]
-	var def: Array = MapGen.find_room_def(home_rid)
+	var my_fi: int = _map_gen._faction_id_map.find(my_fid)
+	if my_fi >= 0 and my_fi < _map_gen.FACTION_STARTS.size():
+		home_rid = _map_gen.FACTION_STARTS[my_fi]["home_room"]
+	var def: Array = _map_gen.find_room_def(home_rid)
 	if not def.is_empty():
-		var rpos: Vector2 = MapGen.room_pixel_pos(def[1], def[2])
-		var rsize: Vector2 = MapGen.room_pixel_size(def[3], def[4])
+		var rpos: Vector2 = _map_gen.room_pixel_pos(def[1], def[2])
+		var rsize: Vector2 = _map_gen.room_pixel_size(def[3], def[4])
 		var center: Vector2 = rpos + rsize * 0.5
 		_camera.position = center
 		_camera.home_room_center = center
@@ -447,6 +469,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("deselect"):
+			if TutorialManager.active:
+				if not _player.has_selection() and _hud.get_pending_command() == "":
+					TutorialManager.skip_tutorial()
+					EventFeed.push("Tutorial skipped.", Color(0.7, 0.7, 0.5))
+					get_viewport().set_input_as_handled()
+					return
 			if _hud.get_pending_command() != "":
 				_hud.clear_pending_command()
 				get_viewport().set_input_as_handled()
@@ -498,6 +526,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		elif event.is_action_pressed("cmd_break_door") and _player.has_selection():
 			_hud._pending_command = "break_door"
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_A and _player.has_selection():
+			_hud._pending_command = "attack"
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_S and _player.has_selection():
+			_hud._pending_command = "stun"
 			get_viewport().set_input_as_handled()
 			return
 
@@ -557,6 +593,31 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# Pending attack/stun: click on an enemy-faction villager
+	if _hud.get_pending_command() in ["attack", "stun"] and _player.has_selection():
+		var combat_cmd: String = _hud.get_pending_command()
+		var target_v: Node = null
+		var best_d: float = INF
+		for v in villagers:
+			if not is_instance_valid(v) or not v.visible:
+				continue
+			if v.faction_id == _player.faction_id or v.faction_id < 0:
+				continue
+			var d: float = click_pos.distance_to(v.global_position)
+			if d < float(v.radius) + 10.0 and d < best_d:
+				best_d = d
+				target_v = v
+		if target_v:
+			if combat_cmd == "attack":
+				_player.command_attack_target(target_v)
+			else:
+				_player.command_stun_target(target_v)
+		else:
+			EventFeed.push("No enemy villager at that location.", Color(0.7, 0.5, 0.3))
+		_hud.clear_pending_command()
+		get_viewport().set_input_as_handled()
+		return
+
 	if _player.has_resource_selection():
 		var sel_res: Node = _player.get_selected_resource()
 		var sel_type: String = _player.get_selected_resource_type()
@@ -598,10 +659,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_hud.set_command_menu_visible(true)
 		return
 
-	# Building selection (homes + churches)
+	# Building selection (homes + churches + banks + fishing huts)
 	var all_buildings: Array = []
 	all_buildings.append_array(homes)
 	all_buildings.append_array(churches)
+	all_buildings.append_array(banks)
+	all_buildings.append_array(fishing_huts)
 	if _player.try_click_building(click_pos, all_buildings, Callable(self, "_room_id_at")):
 		var b: Node = _player.selected_building
 		var can_sell: bool = (b.placed_by_faction == FactionManager.local_faction_id)
@@ -644,31 +707,47 @@ func _finalize_placement(pos: Vector2) -> void:
 
 func _cancel_placement() -> void:
 	var fid: int = FactionManager.local_faction_id
-	if _placing_item == "house":
-		if NetworkManager.is_authority():
-			Economy.add_stone(5, fid)
-	elif _placing_item == "church":
-		if NetworkManager.is_authority():
-			Economy.add_stone(50, fid)
+	if NetworkManager.is_authority():
+		var cost: int = 0
+		if Economy.get_shop_items().has(_placing_item):
+			cost = int(Economy.get_shop_items()[_placing_item]["cost"])
+		if cost > 0:
+			Economy.add_stone(cost, fid)
 	_placing_item = ""
 
 
 func _place_building(item_id: String, pos: Vector2) -> void:
 	## Shared building creation logic (host + client via remote).
+	var fid: int = FactionManager.local_faction_id
 	if item_id == "house":
 		var h = _home_scene.instantiate()
 		_homes_container.add_child(h)
 		h.global_position = pos
-		h.placed_by_faction = FactionManager.local_faction_id
+		h.placed_by_faction = fid
 		homes.append(h)
 		EventFeed.push("Home built.", Color(0.7, 0.6, 0.4))
+		TutorialManager.on_building_placed()
 	elif item_id == "church":
 		var c = _church_scene.instantiate()
 		_churches_container.add_child(c)
 		c.global_position = pos
-		c.placed_by_faction = FactionManager.local_faction_id
+		c.placed_by_faction = fid
 		churches.append(c)
 		EventFeed.push("Church built.", Color(0.5, 0.6, 0.85))
+	elif item_id == "bank":
+		var b = preload("res://scenes/bank.tscn").instantiate()
+		_banks_container.add_child(b)
+		b.global_position = pos
+		b.placed_by_faction = fid
+		banks.append(b)
+		EventFeed.push("Bank built.", Color(0.85, 0.8, 0.5))
+	elif item_id == "fishing_hut":
+		var h = preload("res://scenes/fishing_hut.tscn").instantiate()
+		_huts_container.add_child(h)
+		h.global_position = pos
+		h.placed_by_faction = fid
+		fishing_huts.append(h)
+		EventFeed.push("Fishing Hut built.", Color(0.6, 0.75, 0.9))
 
 
 func _on_building_placed_remote(item_id: String, px: float, py: float) -> void:
@@ -696,19 +775,28 @@ func _on_hud_building_command(cmd_type: String) -> void:
 			building.evict_all()
 			EventFeed.push("Villagers evicted from building.", Color(0.8, 0.6, 0.3))
 		"sell":
+			if building.placed_by_faction == -2:
+				EventFeed.push("Cannot sell pre-placed buildings.", Color(0.9, 0.4, 0.3))
+				return
 			if building.placed_by_faction != FactionManager.local_faction_id:
 				EventFeed.push("Cannot sell — not your building.", Color(0.9, 0.4, 0.3))
 				return
 			building.evict_all()
-			Economy.add_stone(2, FactionManager.local_faction_id)
-			if building in homes:
-				homes.erase(building)
-			if building in churches:
-				churches.erase(building)
+			var item_id: String = ""
+			if building in homes: item_id = "house"
+			elif building in churches: item_id = "church"
+			elif building in banks: item_id = "bank"
+			elif building in fishing_huts: item_id = "fishing_hut"
+			var sell_val: int = Economy.get_sell_value(item_id)
+			Economy.add_stone(sell_val, FactionManager.local_faction_id)
+			if building in homes: homes.erase(building)
+			if building in churches: churches.erase(building)
+			if building in banks: banks.erase(building)
+			if building in fishing_huts: fishing_huts.erase(building)
 			_player.deselect_building()
 			_hud.set_building_menu_visible(false)
 			building.queue_free()
-			EventFeed.push("Building sold for 2 stone.", Color(0.6, 0.7, 0.5))
+			EventFeed.push("Building sold for %d stone." % sell_val, Color(0.6, 0.7, 0.5))
 
 
 func _on_dev_command(cmd: String) -> void:
@@ -726,6 +814,70 @@ func _on_dev_command(cmd: String) -> void:
 			_dev_fog_off = not _dev_fog_off
 			var label := "DEV MODE ON (fog disabled)" if _dev_fog_off else "DEV MODE OFF"
 			EventFeed.push("[DEV] %s" % label, Color(1, 1, 0))
+
+
+func _on_room_captured(room_id: int, new_owner: int, _old_owner: int) -> void:
+	## Check if the captured room is a core room for any faction.
+	if not NetworkManager.is_authority():
+		return
+	for fid in FactionManager.get_all_faction_ids():
+		if FactionManager.is_eliminated(fid):
+			continue
+		if FactionManager.get_core_room(fid) != room_id:
+			continue
+		if new_owner == fid:
+			continue  # Faction recaptured its own core (shouldn't happen, but safe)
+		# Core room captured by another faction — eliminate
+		_eliminate_faction(fid, new_owner)
+		return
+
+
+func _set_war_state(faction_a: int, faction_b: int, at_war: bool) -> void:
+	if faction_a < 0 or faction_b < 0 or faction_a == faction_b:
+		return
+	if not _war_state.has(faction_a):
+		_war_state[faction_a] = {}
+	if not _war_state.has(faction_b):
+		_war_state[faction_b] = {}
+	var was_at_war: bool = _war_state[faction_a].get(faction_b, false)
+	_war_state[faction_a][faction_b] = at_war
+	_war_state[faction_b][faction_a] = at_war
+	if at_war and not was_at_war:
+		var sym_a: String = FactionManager.get_faction_symbol(faction_a)
+		var sym_b: String = FactionManager.get_faction_symbol(faction_b)
+		EventFeed.push("War declared: %s vs %s!" % [sym_a, sym_b], Color(0.9, 0.3, 0.2))
+
+
+func _are_at_war(faction_a: int, faction_b: int) -> bool:
+	return _war_state.get(faction_a, {}).get(faction_b, false)
+
+
+func _eliminate_faction(eliminated_fid: int, captor_fid: int) -> void:
+	FactionManager.eliminate_faction(eliminated_fid)
+	var sym: String = FactionManager.get_faction_symbol(eliminated_fid)
+	var captor_sym: String = FactionManager.get_faction_symbol(captor_fid)
+	EventFeed.push("Faction %s has been ELIMINATED by %s!" % [sym, captor_sym], Color(0.9, 0.2, 0.2))
+
+	# Convert all villagers belonging to eliminated faction
+	for v in villagers:
+		if not is_instance_valid(v):
+			continue
+		if v.faction_id == eliminated_fid:
+			v.faction_id = captor_fid
+
+	# Transfer all buildings placed by eliminated faction
+	for b in homes + churches + banks + fishing_huts:
+		if not is_instance_valid(b):
+			continue
+		if b.placed_by_faction == eliminated_fid:
+			b.placed_by_faction = captor_fid
+
+	# If local faction was eliminated, deselect everything
+	if eliminated_fid == FactionManager.local_faction_id:
+		_player.deselect_all()
+		_hud.set_command_menu_visible(false)
+		_hud.set_building_menu_visible(false)
+		EventFeed.push("Your faction has been eliminated. You are now spectating.", Color(0.9, 0.5, 0.3))
 
 
 # ==============================================================================
@@ -817,6 +969,22 @@ func _apply_net_command(cmd: Dictionary) -> void:
 				v._arrived = true
 				v._idle_timer = GameRNG.randf_range(0.5, 1.5)
 
+		"attack":
+			var target: Node = _find_villager_by_net_id(int(cmd.get("target_net_id", -1)))
+			if target:
+				for nid in net_ids:
+					var v: Node = _find_villager_by_net_id(int(nid))
+					if v and str(v.color_type) == "red":
+						v.command_attack(target)
+
+		"stun":
+			var target: Node = _find_villager_by_net_id(int(cmd.get("target_net_id", -1)))
+			if target:
+				for nid in net_ids:
+					var v: Node = _find_villager_by_net_id(int(nid))
+					if v and str(v.color_type) == "blue":
+						v.command_stun(target)
+
 func _apply_house_command(cmd_villagers: Array) -> void:
 	## Shared logic for house enter/exit used by both local and network paths.
 	var released_any := false
@@ -832,6 +1000,7 @@ func _apply_house_command(cmd_villagers: Array) -> void:
 			v.global_position = building.global_position + Vector2(GameRNG.randf_range(-60, 60), GameRNG.randf_range(40, 80))
 			released_any = true
 	if released_any:
+		TutorialManager.on_release()
 		return
 	for v in cmd_villagers:
 		if not is_instance_valid(v) or not v.visible:
@@ -847,6 +1016,7 @@ func _apply_house_command(cmd_villagers: Array) -> void:
 				best_building = b
 		if best_building:
 			best_building.shelter_villager(v)
+			TutorialManager.on_shelter()
 
 
 
@@ -865,6 +1035,8 @@ func _assign_entities_to_rooms() -> void:
 		if room_map.has(rid):
 			v.room_bounds = room_map[rid].get_rect()
 		room_villagers[rid].append(v)
+		if TutorialManager.active and v.faction_id >= 0:
+			TutorialManager.on_villager_entered_room(rid)
 
 	var all_enemies: Array = enemies.duplicate()
 	all_enemies.append_array(night_enemies)
@@ -1034,6 +1206,7 @@ func _process_red_door_breaking() -> void:
 			if dist < w.BREAK_RADIUS + float(v.radius):
 				w.break_door()
 				EventFeed.push("A red villager broke open a door!", Color(0.9, 0.5, 0.3))
+				TutorialManager.on_door_broken()
 				# Clear break_door_target if this was the target
 				if v.break_door_target != Vector2.ZERO and v.break_door_target.distance_to(mid) < 80.0:
 					v.break_door_target = Vector2.ZERO
@@ -1070,11 +1243,14 @@ func _process_deposits() -> void:
 	for b in banks:
 		for v in villagers:
 			if str(v.carrying_resource) == "stone":
-				b.try_deposit(v)
+				if b.try_deposit(v):
+					TutorialManager.on_deposit("stone")
 	for h in fishing_huts:
 		for v in villagers:
 			if str(v.carrying_resource) == "fish":
-				h.try_deposit(v)
+				if h.try_deposit(v):
+					TutorialManager.on_fish_delivered()
+	
 
 
 # ==============================================================================
@@ -1139,6 +1315,9 @@ func _process_red_hunger(delta: float) -> void:
 				Economy.set_fish(fid, Economy.get_fish(fid) - 1)
 				v.is_fed = true
 				v._satiation_timer = v.SATIATION_PER_LEVEL[clampi(v.level, 1, 3)]
+				# Red L3: each fish extends lifespan
+				if v.level == 3:
+					v.extend_l3_lifespan()
 			else:
 				v.is_fed = false
 				v.health -= RED_STARVE_DPS * delta
@@ -1207,24 +1386,45 @@ func _process_night_enemy_attacks(_delta: float) -> void:
 
 
 func _process_red_shooting() -> void:
-	var dead: Array = []
+	var dead_enemies: Array = []
+	var dead_villagers: Array = []
 	for v in villagers:
 		if str(v.color_type) != "red":
 			continue
 		var target: Node = v.shoot_target_enemy
-		if target == null or not is_instance_valid(target) or target.is_dead:
+		if target == null or not is_instance_valid(target):
 			continue
-		var killed: bool = target.take_red_hit(int(v.level))
-		v.record_kill()
-		v.shoot_target_enemy = null
-		if killed and target not in dead:
-			dead.append(target)
-	for e in dead:
+		# PvP: target is a villager (has faction_id)
+		if target.get("faction_id") != null:
+			if target.faction_id == v.faction_id:
+				continue  ## Never shoot own faction
+			var dmg: float = 10.0 * float(v.level)
+			target.health -= dmg
+			v.record_kill() if target.health <= 0.0 else null
+			if target.health <= 0.0 and target not in dead_villagers:
+				dead_villagers.append(target)
+			# Mark factions at war
+			_set_war_state(v.faction_id, target.faction_id, true)
+		else:
+			# PvE: target is an enemy
+			if target.get("is_dead") and target.is_dead:
+				continue
+			var killed: bool = target.take_red_hit(int(v.level))
+			v.record_kill()
+			v.shoot_target_enemy = null
+			if killed and target not in dead_enemies:
+				dead_enemies.append(target)
+				TutorialManager.on_enemy_killed()
+	for e in dead_enemies:
 		if e in enemies:
 			enemies.erase(e)
 		if e in night_enemies:
 			night_enemies.erase(e)
 		e.die()
+	for v in dead_villagers:
+		villagers.erase(v)
+		EventFeed.push("A %s villager was killed in combat." % str(v.color_type), Color(0.9, 0.3, 0.3))
+		v.start_death_animation()
 
 
 # ==============================================================================
@@ -1235,6 +1435,19 @@ func _on_phase_changed(is_daytime: bool) -> void:
 	if not NetworkManager.is_authority():
 		return
 	if is_daytime:
+		# Dawn: blue L3 villagers that slept in a church get lifespan extended
+		for ch in churches:
+			for v in ch.sheltered:
+				if not is_instance_valid(v):
+					continue
+				if str(v.color_type) == "blue" and v.level == 3:
+					v.extend_l3_lifespan()
+					EventFeed.push("A blue L3 villager rested and lives on.", Color(0.3, 0.5, 0.9))
+		# Tutorial: check if any red villager survived the night fed
+		for v in villagers:
+			if str(v.color_type) == "red" and v.is_fed:
+				TutorialManager.on_red_day_survived()
+				break
 		for h in homes:
 			h.release_all()
 		for ch in churches:
@@ -1452,6 +1665,7 @@ func _process_blue_merging() -> void:
 					villagers.erase(merged[i])
 					merged[i].queue_free()
 				EventFeed.push("Blues merged to Level %d!" % (lv + 1), Color(0.3, 0.5, 0.9))
+				TutorialManager.on_blue_merge()
 
 
 func _process_yellow_leveling(delta: float) -> void:
@@ -1512,9 +1726,15 @@ func _on_buy_requested(item_id: String) -> void:
 
 
 func _get_dupe_chance(faction_id: int) -> float:
-	## Returns 0.0-1.0 duplication probability based on faction pop vs max_pop.
+	## Returns 0.0-1.0 duplication probability based on faction pop vs effective max_pop.
 	## 100% until 15% of max, linear decline to 0% at 100% of max.
-	var max_p: int = FactionManager.max_population
+	var faction_rooms: int = 0
+	for rid in RoomOwnership.ownership:
+		if RoomOwnership.ownership[rid] == faction_id:
+			faction_rooms += 1
+	var total_rooms: int = rooms.size()
+	var claimable: int = maxi(1, total_rooms - FactionManager.get_all_faction_ids().size())
+	var max_p: int = FactionManager.get_effective_max_pop(faction_id, faction_rooms, claimable)
 	if max_p <= 0:
 		return 1.0
 	var current: int = 0
@@ -1527,11 +1747,10 @@ func _get_dupe_chance(faction_id: int) -> float:
 		return 1.0
 	if ratio >= 1.0:
 		return 0.0
-	# Linear from 1.0 at 15% to 0.0 at 100%
 	return clampf(1.0 - (ratio - 0.15) / 0.85, 0.0, 1.0)
 
 
-func _on_villager_shifted(villager, old_color, new_color, spawn_count) -> void:
+func _on_villager_shifted(villager, old_color, new_color, spawn_count, faction_override) -> void:
 	if not NetworkManager.is_authority():
 		return
 	if not is_instance_valid(villager):
@@ -1539,8 +1758,11 @@ func _on_villager_shifted(villager, old_color, new_color, spawn_count) -> void:
 
 	villager.set_color_type(str(new_color))
 
-	# Inherit faction from nearest same-color villager, or stay unowned
-	if villager.faction_id < 0:
+	# For colorless shifting: use faction_override from the dominant influencer
+	if str(old_color) == "colorless" and faction_override >= 0:
+		villager.faction_id = faction_override
+	elif villager.faction_id < 0:
+		# Other unowned villagers: inherit from nearest same-color villager
 		var best_fid: int = -1
 		var best_d: float = INF
 		for other in villagers:
@@ -1553,10 +1775,13 @@ func _on_villager_shifted(villager, old_color, new_color, spawn_count) -> void:
 					best_fid = other.faction_id
 		if best_fid >= 0:
 			villager.faction_id = best_fid
+	# Non-colorless cross-faction shifts: color changes, faction stays (no faction change needed)
 
 	var color_names: Dictionary = {"red": "the red", "yellow": "the yellow", "blue": "the blue", "colorless": "the colorless"}
 	var cname: String = color_names.get(str(new_color), str(new_color))
 	EventFeed.push("A villager joined %s." % cname, ColorRegistry.get_def(str(new_color)).get("display_color", Color.WHITE))
+	# Tutorial hook
+	TutorialManager.on_shift(str(old_color), str(new_color), int(spawn_count))
 
 	# Data-driven extra spawns with population-based probability scaling
 	var dupe_chance: float = _get_dupe_chance(villager.faction_id)
@@ -1605,6 +1830,8 @@ func _update_hud() -> void:
 	_hud.pop_colorless = counts.get("colorless", 0)
 	_hud.pop_enemies = enemies.size() + night_enemies.size()
 	_hud.pop_total = faction_pop.get(my_fid, 0)
+	# Tutorial population hook
+	TutorialManager.on_population_update(_hud.pop_total)
 
 	# Populate selected villager info
 	_hud.selected_villager_info.clear()
@@ -1626,8 +1853,11 @@ func _update_hud() -> void:
 	_hud.selected_building_info.clear()
 	if _player.has_building_selection():
 		var b: Node = _player.selected_building
-		var b_type: String = "Home" if b in homes else "Church"
-		var b_cap: int = b.get_capacity() if b.has_method("get_capacity") else 4
+		var b_type: String = "Home"
+		if b in churches: b_type = "Church"
+		elif b in banks: b_type = "Bank"
+		elif b in fishing_huts: b_type = "Fishing Hut"
+		var b_cap: int = b.get_capacity() if b.has_method("get_capacity") else 0
 		var b_occ: int = b.get_sheltered_count() if b.has_method("get_sheltered_count") else 0
 		var b_fid: int = b.placed_by_faction if b.get("placed_by_faction") != null else -1
 		_hud.selected_building_info = {
@@ -1635,7 +1865,7 @@ func _update_hud() -> void:
 			"capacity": b_cap,
 			"occupied": b_occ,
 			"faction_id": b_fid,
-			"faction_symbol": FactionManager.get_faction_symbol(b_fid) if b_fid >= 0 else "?",
+			"faction_symbol": FactionManager.get_faction_symbol(b_fid) if b_fid >= 0 else ("⚙" if b_fid == -2 else "?"),
 			"faction_color": FactionManager.get_faction_color(b_fid) if b_fid >= 0 else Color(0.5, 0.5, 0.5),
 		}
 
@@ -1646,9 +1876,14 @@ func _update_hud() -> void:
 		if owner_fid >= 0:
 			faction_rooms[owner_fid] = faction_rooms.get(owner_fid, 0) + 1
 
+	# Territory-based effective max pop for local faction
+	var all_fids: Array = FactionManager.get_all_faction_ids()
+	var total_rooms: int = rooms.size()
+	var claimable_rooms: int = maxi(1, total_rooms - all_fids.size())
+
 	# Build score data
 	_hud.score_data.clear()
-	for fid in FactionManager.get_all_faction_ids():
+	for fid in all_fids:
 		_hud.score_data.append({
 			"faction_id": fid,
 			"symbol": FactionManager.get_faction_symbol(fid),
@@ -1658,7 +1893,13 @@ func _update_hud() -> void:
 			"stone": Economy.get_stone(fid),
 			"fish": Economy.get_fish(fid),
 			"rooms": faction_rooms.get(fid, 0),
+			"score": faction_rooms.get(fid, 0) * 100,
+			"eliminated": FactionManager.is_eliminated(fid),
 		})
+
+	# Update effective max pop display for local faction
+	_hud.pop_max_effective = FactionManager.get_effective_max_pop(
+		my_fid, faction_rooms.get(my_fid, 0), claimable_rooms)
 
 
 func _on_villager_dropped_resource(villager: Node2D, resource_type: String) -> void:
@@ -1686,29 +1927,32 @@ func _process_river_fish(delta: float) -> void:
 		return
 	_river_fish_timer -= RIVER_FISH_INTERVAL
 
-	# Count existing fish in the river room
-	var fish_in_river: int = 0
-	for f in fish_spots:
-		if not is_instance_valid(f) or f.collected:
-			continue
-		if _room_id_at(f.global_position) == RIVER_ROOM_ID:
-			fish_in_river += 1
-	if fish_in_river >= RIVER_FISH_MAX:
+	if _river_room_ids.is_empty():
 		return
 
-	var MapGen: GDScript = _map_generator_script
-	var room_def: Array = MapGen.find_room_def(RIVER_ROOM_ID)
-	if room_def.is_empty():
-		return
-	var rpos: Vector2 = MapGen.room_pixel_pos(room_def[1], room_def[2])
-	var rsize: Vector2 = MapGen.room_pixel_size(room_def[3], room_def[4])
-	var f = _fish_scene.instantiate()
-	_fish_container.add_child(f)
-	f.global_position = Vector2(
-		GameRNG.randf_range(rpos.x + 60.0, rpos.x + rsize.x - 60.0),
-		GameRNG.randf_range(rpos.y + 60.0, rpos.y + rsize.y - 60.0))
-	fish_spots.append(f)
-	EventFeed.push("A fish appeared in the river.", Color(0.3, 0.55, 0.75))
+	for river_rid in _river_room_ids:
+		# Count existing fish in this river room
+		var fish_count: int = 0
+		for f in fish_spots:
+			if not is_instance_valid(f) or f.collected:
+				continue
+			if _room_id_at(f.global_position) == river_rid:
+				fish_count += 1
+		if fish_count >= RIVER_FISH_MAX:
+			continue
+
+		var room_def: Array = _map_gen.find_room_def(river_rid)
+		if room_def.is_empty():
+			continue
+		var rpos: Vector2 = _map_gen.room_pixel_pos(room_def[1], room_def[2])
+		var rsize: Vector2 = _map_gen.room_pixel_size(room_def[3], room_def[4])
+		var f = _fish_scene.instantiate()
+		_fish_container.add_child(f)
+		f.global_position = Vector2(
+			GameRNG.randf_range(rpos.x + 60.0, rpos.x + rsize.x - 60.0),
+			GameRNG.randf_range(rpos.y + 60.0, rpos.y + rsize.y - 60.0))
+		fish_spots.append(f)
+		EventFeed.push("A fish appeared in the river.", Color(0.3, 0.55, 0.75))
 
 
 # ==============================================================================
@@ -2055,6 +2299,14 @@ func _draw() -> void:
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(m.x, m.y - 50), Vector2(m.x + 14, m.y - 18), Vector2(m.x - 14, m.y - 18)]),
 				Color(0.3, 0.35, 0.55, 0.4))
+		elif _placing_item == "bank":
+			draw_rect(Rect2(m.x - 50, m.y - 30, 100, 60), Color(0.4, 0.38, 0.32, 0.4))
+			draw_circle(m, 12.0, Color(0.5, 0.52, 0.48, 0.4))
+		elif _placing_item == "fishing_hut":
+			draw_rect(Rect2(m.x - 55, m.y - 25, 110, 55), Color(0.3, 0.25, 0.2, 0.4))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(m.x, m.y - 50), Vector2(m.x + 60, m.y - 25), Vector2(m.x - 60, m.y - 25)]),
+				Color(0.25, 0.35, 0.5, 0.4))
 		draw_string(ThemeDB.fallback_font, Vector2(m.x - 40, m.y + 50),
 			"Click to place  |  Right-click cancel",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.8, 0.7, 0.7))

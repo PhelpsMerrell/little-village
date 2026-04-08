@@ -43,8 +43,11 @@ var remote_cursors: Dictionary = {}
 var synced_map_seed: int = -1
 var synced_faction_count: int = 1
 var synced_max_population: int = 50
+var synced_map_size: String = "medium"
 var synced_peer_factions: Dictionary = {}  ## { peer_id(int) : faction_id(int) }
 var synced_peer_ready: Dictionary = {}  ## { peer_id(int) : bool }
+var synced_peer_slots: Dictionary = {}   ## { peer_id(int) : slot(int) } — host-assigned, 1-based, stable
+var _next_slot: int = 1                  ## increments on each new peer join (host only)
 var lobby_ready: bool = false
 
 
@@ -85,6 +88,20 @@ func get_my_faction() -> int:
 	return get_faction_for_peer(get_my_peer_id())
 
 
+func get_my_slot() -> int:
+	## Returns this peer's host-assigned player slot number (1-based).
+	return synced_peer_slots.get(get_my_peer_id(), 1)
+
+
+func get_peers_sorted_by_slot() -> Array[int]:
+	## Returns all peer ids sorted by their stable host-assigned slot number.
+	## This is the canonical order for lobby UI display — identical on every machine.
+	var all_ids: Array[int] = get_all_peer_ids()
+	all_ids.sort_custom(func(a, b):
+		return synced_peer_slots.get(a, 999) < synced_peer_slots.get(b, 999))
+	return all_ids
+
+
 # ==============================================================================
 # HOST / JOIN
 # ==============================================================================
@@ -98,6 +115,11 @@ func host_game(port: int = DEFAULT_PORT) -> Error:
 	multiplayer.multiplayer_peer = peer
 	is_host = true
 	lobby_ready = false
+	_next_slot = 1
+	synced_peer_slots.clear()
+	# Assign host (peer id 1) slot 1 immediately
+	synced_peer_slots[1] = _next_slot
+	_next_slot += 1
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	EventFeed.push("Hosting on port %d..." % port, Color(0.4, 0.8, 0.4))
@@ -133,6 +155,8 @@ func disconnect_game() -> void:
 	remote_cursors.clear()
 	synced_peer_factions.clear()
 	synced_peer_ready.clear()
+	synced_peer_slots.clear()
+	_next_slot = 1
 	# Disconnect signals safely
 	if multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.disconnect(_on_peer_connected)
@@ -229,25 +253,38 @@ func _rpc_cursor(sender_id: int, x: float, y: float, fid: int) -> void:
 # LOBBY SYNC
 # ==============================================================================
 
-func broadcast_lobby_config(seed_val: int, fcount: int, peer_faction_map: Dictionary, max_pop: int = 50) -> void:
+func broadcast_lobby_config(seed_val: int, fcount: int, peer_faction_map: Dictionary, max_pop: int = 50, map_size: String = "medium") -> void:
 	if not is_host:
 		return
 	synced_map_seed = seed_val
 	synced_faction_count = fcount
 	synced_max_population = max_pop
+	synced_map_size = map_size
 	synced_peer_factions = peer_faction_map.duplicate()
-	if is_online():
-		_rpc_sync_lobby.rpc(seed_val, fcount, peer_faction_map, max_pop)
+	_broadcast_lobby_state()
+
+
+func _broadcast_lobby_state() -> void:
+	if not is_host or not is_online():
+		return
+	_rpc_receive_lobby_state.rpc(synced_peer_factions, synced_peer_ready, synced_peer_slots, synced_map_seed, synced_faction_count, synced_max_population, synced_map_size)
 
 
 @rpc("authority", "reliable")
-func _rpc_sync_lobby(seed_val: int, fcount: int, pfmap: Dictionary, max_pop: int = 50) -> void:
-	synced_map_seed = seed_val
-	synced_faction_count = fcount
-	synced_max_population = max_pop
+func _rpc_receive_lobby_state(pfmap: Dictionary, pready: Dictionary, pslots: Dictionary, seed_val: int, fcount: int, max_pop: int, map_size: String) -> void:
 	synced_peer_factions.clear()
 	for k in pfmap:
 		synced_peer_factions[int(k)] = int(pfmap[k])
+	synced_peer_ready.clear()
+	for k in pready:
+		synced_peer_ready[int(k)] = bool(pready[k])
+	synced_peer_slots.clear()
+	for k in pslots:
+		synced_peer_slots[int(k)] = int(pslots[k])
+	synced_map_seed = seed_val
+	synced_faction_count = fcount
+	synced_max_population = max_pop
+	synced_map_size = map_size
 
 
 func broadcast_start_game() -> void:
@@ -270,15 +307,16 @@ func send_ready_toggle() -> void:
 	if is_online() and not is_host:
 		_rpc_ready_toggle.rpc_id(1)
 	else:
-		# Host toggles own ready
 		var pid: int = get_my_peer_id()
 		synced_peer_ready[pid] = not synced_peer_ready.get(pid, false)
+		_broadcast_lobby_state()
 
 
 @rpc("any_peer", "reliable")
 func _rpc_ready_toggle() -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
 	synced_peer_ready[sender] = not synced_peer_ready.get(sender, false)
+	_broadcast_lobby_state()
 
 
 ## Client requests faction change
@@ -287,6 +325,7 @@ func send_faction_choice(faction_id: int) -> void:
 		_rpc_faction_choice.rpc_id(1, faction_id)
 	else:
 		synced_peer_factions[get_my_peer_id()] = faction_id
+		_broadcast_lobby_state()
 
 
 @rpc("any_peer", "reliable")
@@ -294,6 +333,7 @@ func _rpc_faction_choice(faction_id: int) -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
 	if faction_id >= 0 and faction_id < synced_faction_count:
 		synced_peer_factions[sender] = faction_id
+	_broadcast_lobby_state()
 
 
 func are_all_ready() -> bool:
@@ -329,14 +369,16 @@ func _on_peer_connected(id: int) -> void:
 	if id not in connected_peers:
 		connected_peers.append(id)
 	player_connected.emit(id)
-	EventFeed.push("Player %d connected." % id, Color(0.4, 0.7, 0.9))
-	# Assign default faction and re-send lobby config
+	EventFeed.push("Player connected (id %d)." % id, Color(0.4, 0.7, 0.9))
+	# Assign stable slot, default faction, and broadcast full state to all
 	if is_host:
+		if not synced_peer_slots.has(id):
+			synced_peer_slots[id] = _next_slot
+			_next_slot += 1
 		if not synced_peer_factions.has(id):
 			synced_peer_factions[id] = 0
 		synced_peer_ready[id] = false
-		if synced_map_seed != -1:
-			_rpc_sync_lobby.rpc_id(id, synced_map_seed, synced_faction_count, synced_peer_factions, synced_max_population)
+		_broadcast_lobby_state()
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -344,8 +386,12 @@ func _on_peer_disconnected(id: int) -> void:
 	remote_cursors.erase(id)
 	synced_peer_factions.erase(id)
 	synced_peer_ready.erase(id)
+	var slot_num: int = synced_peer_slots.get(id, 0)
+	synced_peer_slots.erase(id)
 	player_disconnected.emit(id)
-	EventFeed.push("Player %d disconnected." % id, Color(0.8, 0.5, 0.3))
+	var slot_label: String = ("P%d" % slot_num) if slot_num > 0 else "A player"
+	EventFeed.push("%s disconnected." % slot_label, Color(0.8, 0.5, 0.3))
+	_broadcast_lobby_state()
 
 
 func _on_connected_to_server() -> void:

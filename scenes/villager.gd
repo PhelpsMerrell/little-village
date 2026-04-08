@@ -45,9 +45,13 @@ var is_being_influenced: bool = false
 var influence_attractor: Vector2 = Vector2.ZERO
 
 ## Player commands — override AI brain when active
-var command_mode: String = "none"  # none, move_to, hold
+var command_mode: String = "none"  # none, move_to, hold, combat
 var command_target: Vector2 = Vector2.ZERO
 var is_selected: bool = false
+
+## PvP combat command state
+var combat_target: Node = null   ## Target villager for PvP combat command
+var combat_mode: String = ""     ## "attack" or "stun"
 
 ## Dynamic shift target for colorless villagers (set by influence_manager)
 var pending_shift_color: String = ""
@@ -56,8 +60,13 @@ var kill_count: int = 0
 var is_fed: bool = true
 var _satiation_timer: float = 0.0  # seconds remaining before next fish needed
 
-const SATIATION_PER_LEVEL := [0.0, 1200.0, 2400.0, 3600.0]  # L1=1day, L2=2days, L3=3days
+const SATIATION_PER_LEVEL := [0.0, 1200.0, 2400.0, 600.0]  # L1=1day, L2=2days, L3=needs 2 fish/day (every half-day)
 const L2_SPEED_MULT := 1.4  # L2 villagers move 40% faster
+const L3_BASE_LIFESPAN_DAYS: int = 2   ## All L3 units live 2 game-days without sustain
+
+## L3 lifecycle state
+var _l3_lifespan_timer: float = 0.0   ## Countdown timer; 0 = not L3 or not started
+var _l3_church_slept: bool = false     ## True if blue L3 slept in church this night cycle
 
 var leveling_partner: Node2D = null
 var leveling_meter: float = 0.0
@@ -136,6 +145,7 @@ func setup(p_color: String, pos: Vector2, p_level: int = 1) -> void:
 	color_type = p_color; position = pos; level = p_level
 	shift_meter = 0.0; _decay_grace_timer = 0.0; kill_count = 0; is_fed = true
 	leveling_meter = 0.0; leveling_partner = null; carrying_resource = ""
+	_l3_lifespan_timer = 0.0; _l3_church_slept = false
 	_sync_definition(); _idle_timer = GameRNG.randf_range(0.3, 1.0)
 
 func set_color_type(new_type: String) -> void:
@@ -143,11 +153,21 @@ func set_color_type(new_type: String) -> void:
 	color_type = new_type; level = 1
 	shift_meter = 0.0; _decay_grace_timer = 0.0; kill_count = 0; is_fed = true
 	leveling_meter = 0.0; leveling_partner = null; carrying_resource = ""
+	_l3_lifespan_timer = 0.0; _l3_church_slept = false
 	_sync_definition()
 	health = max_health * hp_ratio
 
 func set_level(new_level: int) -> void:
+	var old_level: int = level
 	level = clampi(new_level, 1, 3); _sync_definition()
+	# Start L3 lifespan timer on promotion to L3
+	if level == 3 and old_level < 3:
+		_l3_lifespan_timer = float(L3_BASE_LIFESPAN_DAYS) * GameClock.DAY_DURATION
+		_l3_church_slept = false
+	# Clear timer if demoted from L3 (e.g. via shift)
+	elif level < 3:
+		_l3_lifespan_timer = 0.0
+		_l3_church_slept = false
 
 func record_kill() -> void: kill_count += 1
 func is_carrying() -> bool: return carrying_resource != ""
@@ -198,6 +218,17 @@ func _process(delta: float) -> void:
 	_update_label()
 	_shoot_cooldown = maxf(0.0, _shoot_cooldown - delta)
 	_shot_flash_timer = maxf(0.0, _shot_flash_timer - delta)
+	# Stun tick
+	if _stun_timer > 0.0:
+		_stun_timer -= delta
+		queue_redraw()
+		return
+	# L3 lifespan countdown (host-only; puppet state synced via snapshot)
+	if level == 3 and _l3_lifespan_timer > 0.0 and not is_puppet:
+		_l3_lifespan_timer -= delta
+		if _l3_lifespan_timer <= 0.0:
+			_die_from_lifespan()
+			return
 	if not _dragging and _move_speed > 0.0:
 		_evaluate_brain(delta); _do_movement(delta); _apply_separation()
 	queue_redraw()
@@ -218,6 +249,7 @@ func _update_label() -> void:
 func _evaluate_brain(_delta: float) -> void:
 	shoot_target_enemy = null
 	if _check_command(): return
+	if _check_combat_command(): return
 	if _check_danger(): return
 	if _check_job(): return
 	if _check_influence(): return
@@ -242,6 +274,38 @@ func clear_command() -> void:
 	command_mode = "none"
 	command_target = Vector2.ZERO
 
+func _check_combat_command() -> bool:
+	if command_mode != "combat":
+		return false
+
+	if not is_instance_valid(combat_target) or combat_target.get("_dying"):
+		combat_target = null
+		combat_mode = ""
+		command_mode = "none"
+		return false
+
+	_brain_state = "combat"
+	var dist: float = global_position.distance_to(combat_target.global_position)
+
+	var target_radius: float = 22.0
+	if "radius" in combat_target:
+		target_radius = float(combat_target.radius)
+
+	if combat_mode == "attack" and dist < SHOOT_RANGE and _shoot_cooldown <= 0.0:
+		shoot_target_enemy = combat_target
+		shoot_target_pos = combat_target.global_position
+		_shoot_cooldown = SHOOT_COOLDOWN
+		_shot_flash_timer = 0.15
+		_set_target(combat_target.global_position)
+	elif combat_mode == "stun" and dist < radius + target_radius + 20.0:
+		if combat_target.has_method("apply_stun"):
+			combat_target.apply_stun(2.0)
+		_shoot_cooldown = SHOOT_COOLDOWN
+	else:
+		_set_target(combat_target.global_position)
+
+	return true
+
 func command_move_to(pos: Vector2) -> void:
 	command_mode = "move_to"
 	command_target = pos
@@ -251,6 +315,18 @@ func command_hold() -> void:
 
 func command_release() -> void:
 	clear_command()
+	combat_target = null
+	combat_mode = ""
+
+func command_attack(target: Node) -> void:
+	combat_target = target
+	combat_mode = "attack"
+	command_mode = "combat"
+
+func command_stun(target: Node) -> void:
+	combat_target = target
+	combat_mode = "stun"
+	command_mode = "combat"
 
 func _check_danger() -> bool:
 	var nearest_enemy: Node = _find_nearest_enemy()
@@ -537,6 +613,10 @@ func _draw() -> void:
 		draw_color = base_color.lerp(ColorRegistry.get_def(next_id).get("display_color", Color.WHITE), shift_meter / 100.0)
 	if color_type == "red" and not is_fed:
 		draw_color = draw_color.darkened(0.3 * (0.5 + sin(Time.get_ticks_msec() * 0.005) * 0.2))
+	# Faction ring — drawn before body so body renders on top
+	if faction_id >= 0:
+		var fcolor: Color = FactionManager.get_faction_color(faction_id)
+		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 32, fcolor, 4.0)
 	match level:
 		1: _draw_circle_body(draw_color)
 		2: _draw_square_body(draw_color)
@@ -667,3 +747,26 @@ func start_death_animation() -> void:
 		var dropped_type: String = carrying_resource
 		carrying_resource = ""
 		resource_dropped.emit(self, dropped_type)
+
+
+func _die_from_lifespan() -> void:
+	## L3 villager expires from age.
+	_l3_lifespan_timer = 0.0
+	EventFeed.push("L3 %s villager expired." % color_type, Color(0.6, 0.3, 0.3))
+	start_death_animation()
+
+
+func extend_l3_lifespan() -> void:
+	## Called when red L3 eats fish or blue L3 sleeps in church.
+	if level == 3:
+		_l3_lifespan_timer = float(L3_BASE_LIFESPAN_DAYS) * GameClock.DAY_DURATION
+
+
+var _stun_timer: float = 0.0
+
+func apply_stun(duration: float) -> void:
+	## Blue PvP: temporarily stuns this villager (freezes brain).
+	_stun_timer = maxf(_stun_timer, duration)
+
+func _is_stunned() -> bool:
+	return _stun_timer > 0.0

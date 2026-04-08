@@ -1,169 +1,234 @@
-# Little Village — Game State
+# Little Village — Game State Reference
 
-## Architecture
+## Architecture Overview
 
-- **Engine:** Godot 4.6, GDScript
-- **Scenes:** `scenes/` — villager, main, hud, home, camera, map_generator, player_controller, lobby, title_screen, wall_segment, room, options_menu, enemy, demon, zombie, bank, fishing_hut, church, collectable, fish_spot, fog_overlay
-- **Obstacles:** `scenes/obstacles/` — breakable_wall_obstacle, river_obstacle, water_obstacle
-- **Autoloads (load order):** ColorRegistry → GameRNG → InputConfig → InfluenceManager → GameClock → Economy → NightEvents → EventFeed → SaveManager → FogOfWar → FactionManager → RoomOwnership → NetworkManager
-- **Docs:** `docs/` — GAME_STATE.md, ASSET_REPLACEMENT_GUIDE.md, MAP_GENERATION_GUIDELINES.md
+- **Host-authoritative**: Only the host runs simulation. Clients send commands and receive state snapshots at `SYNC_RATE` (10 Hz).
+- **Solo mode**: `NetworkManager.is_online()` returns false — zero networking overhead. Same code path as host.
+- **Autoloads**: ColorRegistry, GameRNG, InputConfig, InfluenceManager, GameClock, Economy, NightEvents, EventFeed, SaveManager, FogOfWar, FactionManager, RoomOwnership, NetworkManager, TutorialManager.
 
-## Multiplayer (Host-Authoritative)
+---
 
-- **Model:** Host-authoritative via ENet. Host runs full simulation, clients send commands only.
-- **Snapshots:** Host broadcasts state at 10Hz. Clients interpolate between snapshots.
-- **Commands:** Clients send commands (move, hold, build, break_door, etc.) via RPC to host.
-- **Determinism:** `GameRNG` autoload wraps `RandomNumberGenerator` with shared seed. ALL gameplay-affecting randomness uses `GameRNG.*`.
-- **Solo:** `NetworkManager.is_online()` = false → commands apply directly → zero overhead.
+## Lobby Sync
 
-## Lobby (`scenes/lobby.gd`)
+**Pattern**: `_broadcast_lobby_state()` in `network_manager.gd`.
 
-Three modes with separate UX flows:
+Every mutation to lobby state (ready toggle, faction choice, peer connect/disconnect) triggers a full broadcast of `synced_peer_factions`, `synced_peer_ready`, `synced_map_seed`, `synced_faction_count`, `synced_max_population`, and `synced_map_size` to all connected clients via `_rpc_receive_lobby_state`.
 
-- **Solo:** Max pop (default 300), map seed, faction picker, Start button → straight to game.
-- **Host:** Player count, max pop, map seed → Start → waiting room. Players pick factions and ready up. Host can override factions. Launch when all ready.
-- **Join:** Address field + Submit → waiting room. Pick faction, ready up, wait for host launch.
+- `send_ready_toggle()` → host updates `synced_peer_ready`, broadcasts to all.
+- `send_faction_choice()` → host updates `synced_peer_factions`, broadcasts to all.
+- `_on_peer_connected()` → host assigns default faction, broadcasts full state.
+- `_on_peer_disconnected()` → host removes peer data, broadcasts updated state.
+- `broadcast_lobby_config()` → sets all synced values and broadcasts.
+- New field: `synced_map_size: String` ("small"/"medium"/"large"/"xl").
 
-Scene transition uses `call_deferred("_deferred_change_to_main")` with `is_inside_tree()` guard.
+Clients never update their synced dicts locally — they only receive from the authoritative broadcast.
 
-## Faction System (`autoload/faction_manager.gd`)
+---
 
-- `faction_id` on every villager. Solo = faction 0. Multi = 0..N-1. Unowned colorless = -1.
-- Selection, fog visibility, dragging all gated to `FactionManager.is_local_faction(v.faction_id)`.
-- Shifted villagers inherit faction from nearest same-color villager.
-- `max_population` set from lobby (default 300 solo, configurable in host).
+## Factions
 
-## Starting Layout (Multi-faction)
+Each faction has an `id`, `name`, `color` (Color), and `eliminated` flag. Managed by `FactionManager` autoload.
 
-- Each faction gets a 2x2 home room (4 corners of map).
-- 3 starting villagers (red, yellow, blue) placed in separate corners of room, >540px apart.
-- Magic orb in room center. Player must drag villagers together to begin shifting.
-- Same faction on multiple players = single starting setup.
+- `local_faction_id`: Which faction this client controls.
+- `get_faction_color(id)` / `get_faction_symbol(id)`: Returns visual identity.
+- Villagers carry `faction_id`. Colorless villagers use `faction_id = -1`.
 
-## PlayerController (`scenes/player_controller.gd`)
+### Faction Visual Identification (Phase 3)
 
-- Owns selection state, command input. Faction-aware.
-- Solo: commands apply directly. Multiplayer: sent via NetworkManager RPC.
-- Commands: move_to, hold, release, enter_exit_house, break_door.
+Each villager draws a **faction ring** in `_draw()`:
+- A thick arc (`draw_arc`, width 4.0) at `radius + 6.0` using `FactionManager.get_faction_color(faction_id)`.
+- Drawn **before** the body so the body renders on top.
+- Not drawn for `faction_id == -1` (unowned/colorless).
+- Body outline (`_get_faction_border_color()`) also uses faction color.
+- `_draw_faction_symbol()` renders the faction glyph inside the body.
 
-## Selection System
+---
 
-### Standard Mode (no modifier)
-- Left-click: select single villager. Shift+click: add/remove from selection.
-- Right-click: move command for selected villagers.
-- Left-click empty ground: deselect all.
-- Drag-and-drop: click and drag individual villagers.
+## Color System
 
-### Shift-Hover Selection Mode
-- **Hold Shift** to enter selection mode (cyan ring cursor indicator).
-- While holding Shift, hovering over any owned villager auto-selects it (additive).
-- Drag-and-drop is suppressed while Shift is held.
-- Selection persists when Shift is released.
-- Designed for rapidly selecting large groups (10-20+ units) via sweeping.
+Colors: `red`, `yellow`, `blue`, `colorless`, `magic_orb`. Defined in `color_registry.gd`.
 
-## Command Menu (HUD)
+Shift chain: colorless → red → yellow → blue → red (loop)
 
-- Bottom-right panel shown when villagers are selected.
-- **Only shared commands shown:** Commands are filtered based on selected unit types. A command only appears if ALL selected units support it.
-- Universal commands: Move, Hold, House, Release.
-- Red-only commands: Break Door.
-- **Move** sets pending mode, next click = target position.
-- **Break Door** sets pending mode, next click near a closed door = red moves to break it.
-- Keyboard shortcuts: G=Hold, H=House, X=Release, M=Move, R=Break Door.
-- Signal `command_issued` → main.gd `_on_hud_command()`.
+### Color Roles
+- **Red**: Attack (ranged shoot), break doors, hunger mechanic. PvP: attacks enemy villagers.
+- **Yellow**: Collect stone, deposit at bank. Levels by pairing. Duplicates on shift (spawn_count=2 at L1).
+- **Blue**: Collect fish, deposit at hut. Merges to level. Heals in church. PvP: stuns enemy villagers.
+- **Colorless**: Neutral wanderers. Shifts to whichever color group influences them. Joins that faction on shift.
+- **Magic Orb**: Stationary influence catalyst. `influence_rate = 4.0` (doubled from original 2.0 to compensate halved BASE_SHIFT_SPEED).
 
-### Selection Info Panel
-- Shows total selected count.
-- Per-color/type breakdown with counts.
-- Individual villager details (HP) when ≤4 selected.
+### Cross-Faction Color Shifting (Phase 5)
 
-## Doors & Walls
+Villagers CAN change color when influenced by a different faction — **faction does not change on shift**. The villager keeps its `faction_id`. Exception: colorless villagers (`faction_id = -1`) that shift join the faction of their dominant influencer.
 
-### Wall Segments (`scenes/wall_segment.gd`)
-- Generated between all adjacent rooms.
-- **Solid walls:** Cannot be broken. Block movement and influence.
-- **Doors:** Start CLOSED. Must be broken by red villagers to open.
-- Once opened, doors stay open permanently. Rubble visual replaces barricade.
+Implementation: `InfluenceManager` tracks `dominant_faction` per target during group processing. `_trigger_shift()` passes `faction_override` through `villager_shifted` signal. `main.gd._on_villager_shifted()` applies it only for colorless.
 
-### Door Breaking
-- **Automatic:** Red villagers within `BREAK_RADIUS + radius` of a closed door auto-break it.
-- **Manual command:** Select reds → Break Door → click a closed door → reds move to and break it.
-- `break_door_target` on villager tracks commanded door position. Cleared after breaking.
-- Works in both solo and multiplayer (break_door network command type).
+---
 
-### Wall Collision
-- `brain_walls` array on villager, populated by main.gd each frame.
-- `_wall_blocks(from, to)` checks movement crossing closed walls via segment intersection.
-- Cross-room movement blocked at closed walls. Doorway pathfinding redirects through open doors.
+## Influence / Shift System
 
-## Room Ownership (`autoload/room_ownership.gd`)
+Managed by `InfluenceManager` autoload (`influence_manager.gd`).
 
-- Faction gains ownership: 4+ units, uncontested, 90 seconds capture time.
-- Contested: progress pauses. Abandoned: 3s grace → 2x decline.
-- Enemy room capture takes 2x (neutralize first).
-- Ownership enables building in owned rooms.
+### Balance (Phase 4)
+- `BASE_SHIFT_SPEED = 9.0` (was 18.0 — halved across the board).
+- Magic orb `influence_rate = 4.0` (doubled to compensate, net effect unchanged).
+- L3 vs L3: `_level_multiplier()` returns `0.2` (L1/L2 cannot shift L3, returns 0.0).
+- Yellow L3 exception: always returns `1.0` (can always be shifted).
 
-## Influence System (`autoload/influence_manager.gd`)
+### Mechanics
+- `SHIFT_MAX = 100.0`. Meter fills based on `BASE_SHIFT_SPEED × influence_rate × proximity_factor × level_multiplier × delta`.
+- 3-second grace period before decay starts (`DECAY_GRACE_PERIOD`).
+- Connected rooms (open doors) share influence groups.
 
-- Range-based: ~15× radius. Stronger when closer.
-- Level-aware: influencer level must >= target level.
-- 3-second grace period before shift meter decays.
-- Colorless villagers shift to strongest influence color.
-- Influence does NOT cross closed walls/doors.
-- Same-faction villagers DO influence each other.
+---
 
-## Color Types (color_registry.gd)
+## Level 3 Lifecycle (Phase 6)
 
-| Color | Radius | Health | Speed | Shifts To | Abilities |
-|-------|--------|--------|-------|-----------|-----------|
-| Red | 35 | 50 | 6 | Yellow | damage, break_walls |
-| Yellow | 27 | 15 | 10 | Blue | — |
-| Blue | 45 | 200 | 3 | Red | swim, move_boulders |
-| Colorless | 25 | 25 | 7 | (dynamic) | fast_shifter |
-| Magic Orb | 25 | 100 | 0 | — | catalyst |
+All L3 units have a **2-day base lifespan** (`L3_BASE_LIFESPAN_DAYS = 2`).
 
-## Input System (`autoload/input_config.gd`)
+### Timer
+- `_l3_lifespan_timer` starts when `set_level(3)` is called.
+- Ticks down in `_process()` on the host only (not puppets).
+- Reaches 0 → `_die_from_lifespan()` → death animation + EventFeed message.
+- Timer clears if villager is shifted back below L3.
 
-Registered InputMap actions, remappable via options menu:
+### Sustain Conditions
+- **Red L3**: Each fish eaten via the hunger system calls `extend_l3_lifespan()`, resetting the timer. Satiation interval for L3 is 600s (every half-day = 2 fish/day required).
+- **Blue L3**: If sheltered in a church during the night and still inside at dawn, `extend_l3_lifespan()` is called in `_on_phase_changed()`.
+- **Yellow L3**: No sustain — expires after exactly 2 days. (Yellow L3 can still be shifted by any source.)
 
-| Action | Default | Description |
-|--------|---------|-------------|
-| cmd_hold | G | Hold Position |
-| cmd_house | H | Enter/Exit House |
-| cmd_release | X | Release Command |
-| cmd_move | M | Move (then click) |
-| cmd_break_door | R | Break Door (Red) |
-| toggle_shop | B | Toggle Shop |
-| quick_save | F5 | Quick Save |
-| toggle_fog_dev | 0 | [DEV] Toggle Fog |
-| deselect | Escape | Deselect / Menu |
-| dev_next_phase | 9 | [DEV] Next Phase |
+### `extend_l3_lifespan()`
+Resets `_l3_lifespan_timer = L3_BASE_LIFESPAN_DAYS × GameClock.DAY_DURATION`.
 
-## HUD (`scenes/hud.gd`)
+---
 
-- Day/night bar (top), population panel (bottom-left, 420×220).
-- Event feed (right, 340w, expandable).
-- Selection panel (bottom-right) with filtered commands + group info.
-- Building menu (bottom-right) for selected buildings.
-- Score overlay (Tab) showing per-faction stats.
-- Shop overlay (B key).
+## Satiation (Hunger)
 
-## Economy (`autoload/economy.gd`)
+Managed in `main.gd._process_red_hunger()`. Only red villagers have hunger.
 
-- Per-faction resources: stone, fish.
-- Shop items: House (5 stone), Church (50 stone).
-- Building gated to owned rooms in multi-faction mode.
+- `SATIATION_PER_LEVEL = [0.0, 1200.0, 2400.0, 600.0]` — L3 now 600s (half-day) requiring ~2 fish/day.
+- When satiation runs out, checks `Economy.get_fish(faction_id)`. If available, consumes 1 fish and resets timer.
+- If no fish: `is_fed = false`, takes `RED_STARVE_DPS` damage per second. Dies at 0 HP.
+- L3 red: each fish also calls `extend_l3_lifespan()`.
 
-## Night System
+---
 
-- Day/night cycle via GameClock.
-- Night events: demon_hunt, zombie_plague, quiet_night.
-- Auto-sheltering at nightfall. Buildings release at dawn.
-- Red L3 stays outside during night.
+## Combat System (Phase 7)
 
-## Remaining Work
+### PvE (Automatic)
+- Red villagers auto-shoot enemies within `SHOOT_RANGE = 200px` when `brain_enemies` is populated.
+- Enemies auto-attack non-red villagers on contact.
+- Kill tracking on `villager.kill_count` drives red leveling.
 
-- **PvP Phase 5:** Cross-faction combat, contested resources, influence warfare, territory scoring, victory conditions.
-- **Save/load:** Needs faction_id, net_id, ownership state, wall/door states.
-- **Camera improvements:** Minimap, faction home hotkey.
-- **Port forwarding:** ENet uses port 7350. Users need to forward for internet play.
+### PvP (Player-Commanded)
+Commands: `command_attack(target)` and `command_stun(target)` on villager.gd.
+
+- Sets `command_mode = "combat"`, `combat_target`, `combat_mode`.
+- `_check_combat_command()` runs in brain (priority: after command, before danger).
+- **Attack** (red only): moves to SHOOT_RANGE, fires. Deals `10 × level` damage per shot. Target keeps faction.
+- **Stun** (blue only): moves to melee range, calls `combat_target.apply_stun(2.0)`. Stun freezes target brain for 2s.
+- Combat persists until: target dies, player issues release command, or new command issued.
+
+### Player Flow
+1. Select red/blue villagers.
+2. Press **A** (attack) or **S** (stun), or click the button in the command panel.
+3. Click an enemy-faction villager — command issued.
+4. In multiplayer: sent as `"attack"`/`"stun"` RPC with `target_net_id`.
+
+### `_process_red_shooting()`
+Handles both PvE and PvP targets. Checks `target.get("faction_id")` to distinguish:
+- PvP: applies damage directly to `target.health`, calls `_set_war_state()`.
+- PvE: calls `target.take_red_hit()`.
+
+### War State
+`_war_state: Dictionary` in main.gd. `_set_war_state(a, b, true)` marks factions as at war symmetrically. First declaration fires an EventFeed message. Accessed via `_are_at_war(a, b)`.
+
+---
+
+## Network Commands
+
+All commands flow through `NetworkManager.send_command()` → host `_apply_net_command()`.
+
+| type | data | effect |
+|------|------|--------|
+| move_to | net_ids, tx, ty | villagers move |
+| hold | net_ids | toggle hold |
+| release | net_ids | clear commands |
+| enter_exit_house | net_ids | shelter/release |
+| break_door | net_ids, tx, ty | red breaks door |
+| build_place | item_id, px, py | place building |
+| drag_start/move/end | net_id, px, py | drag villager |
+| attack | net_ids, target_net_id | red PvP attack |
+| stun | net_ids, target_net_id | blue PvP stun |
+
+---
+
+## State Snapshots
+
+Host broadcasts at `SYNC_RATE = 10Hz`. Clients interpolate. Snapshot keys:
+- `v`: villager array `[net_id, x*10, y*10, hp, max_hp, color_idx, level, carry, visible, cmd, faction_id, shift_meter, is_fed]`
+- `e`: enemy array, `ne`: night enemy array
+- `cc`/`fc`: collected resource indices
+- `eco`: per-faction `[stone, fish]`
+- `clk`: `[elapsed, day_count, is_paused]`
+- `own`: room ownership dict
+- `ws`: wall open/closed states
+
+---
+
+## Tutorial System (Phase 8)
+
+Autoload: `TutorialManager` (`autoload/tutorial_manager.gd`).
+
+### Phases
+| Phase | Objective |
+|-------|-----------|
+| 1 — Awakening | Drag villager to orb → shift occurs |
+| 2 — Growth | Yellow duplicate produced (spawn_count > 1) |
+| 3 — Control | Blue merge occurs |
+| 4 — Economy | Stone deposited at bank |
+| 5 — Food Chain | Fish delivered to fishing hut |
+| 6 — Survival | Red survives fed through a full day |
+| 7 — Expansion | Red breaks a door |
+| 8 — Building | House placed via shop |
+| 9 — Housing | Villager sheltered then released |
+| 10 — Full Loop | 10+ villagers across all colors |
+
+### Hooks in main.gd
+- `on_shift()` — after `_on_villager_shifted`
+- `on_blue_merge()` — after blue merge in `_process_blue_merging`
+- `on_deposit("stone")` / `on_fish_delivered()` — in `_process_deposits`
+- `on_red_day_survived()` — in `_on_phase_changed` at dawn
+- `on_door_broken()` — in `_process_red_door_breaking`
+- `on_building_placed()` — in `_place_building` (house only)
+- `on_shelter()` / `on_release()` — in `_apply_house_command`
+- `on_population_update(total)` — in `_update_hud`
+
+### HUD Overlay
+`hud.gd._draw_tutorial_overlay()`: renders a centered box below the day/night bar showing the current instruction and phase number. Press Escape to skip.
+
+---
+
+## Economy
+
+`Economy` autoload. Per-faction stone and fish counts.
+
+- `get_stone(fid)` / `set_stone(fid, v)` / `add_stone(v, fid)`
+- `get_fish(fid)` / `set_fish(fid, v)`
+- `purchase(item_id)` — deducts cost, returns false if insufficient.
+- `get_sell_value(item_id)` — half of build cost.
+
+---
+
+## Room Ownership
+
+`RoomOwnership` autoload. Tracks which faction controls each room based on villager presence. Fires `room_captured(room_id, new_owner, old_owner)` signal. Core room capture triggers faction elimination.
+
+---
+
+## Day/Night Cycle
+
+`GameClock` autoload. `DAY_DURATION` and `CYCLE_DURATION` constants. `phase_changed(is_daytime)` signal. `is_daytime`, `day_count`, `elapsed` properties.
+
+- Dawn: releases sheltered villagers, despawns night enemies, checks blue L3 church sustain, checks red survival for tutorial.
+- Dusk: auto-shelters villagers (except red L3), spawns night wave if event active.

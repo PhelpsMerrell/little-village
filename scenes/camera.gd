@@ -1,5 +1,5 @@
 extends Camera2D
-## Pan: right-click drag, middle-mouse drag, WASD/Arrows.
+## Pan: middle-mouse drag, WASD/Arrows.
 ## Zoom: scroll wheel, Q/E keys.
 ## F11: toggle fullscreen.
 ## Camera is clamped to map bounds. Zoom limited by explored area.
@@ -12,7 +12,6 @@ const ZOOM_KEY_SPEED := 1.0
 const FOG_PADDING_ROOMS := 1  # how many unexplored rooms beyond edge to allow seeing
 
 var _panning := false
-var _pan_start := Vector2.ZERO
 
 ## Set by main.gd after rooms are collected
 var map_bounds: Rect2 = Rect2()
@@ -32,15 +31,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_zoom(ZOOM_STEP)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_apply_zoom(-ZOOM_STEP)
-		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_panning = event.pressed
-			if _panning:
-				_pan_start = get_global_mouse_position()
 
 	if event is InputEventMouseMotion and _panning:
-		var current := get_global_mouse_position()
-		position += _pan_start - current
-		_pan_start = get_global_mouse_position()
+		position -= event.relative / zoom.x
 		_clamp_position()
 
 	if event is InputEventKey and event.pressed and not event.echo:

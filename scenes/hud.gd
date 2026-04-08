@@ -14,6 +14,7 @@ var pop_blue: int = 0
 var pop_colorless: int = 0
 var pop_enemies: int = 0
 var pop_total: int = 0
+var pop_max_effective: int = 50
 
 var _shop_open: bool = false
 var _shop_items: Array = []
@@ -32,6 +33,8 @@ const CMD_BUTTONS := [
 	{"id": "hold", "label": "Hold", "color": Color(1.0, 0.8, 0.2), "requires": ""},
 	{"id": "house", "label": "House", "color": Color(0.7, 0.5, 0.3), "requires": ""},
 	{"id": "break_door", "label": "Break Door", "color": Color(0.9, 0.4, 0.2), "requires": "red"},
+	{"id": "attack", "label": "Attack [A]", "color": Color(0.85, 0.2, 0.2), "requires": "red"},
+	{"id": "stun", "label": "Stun [S]", "color": Color(0.2, 0.4, 0.85), "requires": "blue"},
 	{"id": "release", "label": "Release", "color": Color(0.6, 0.6, 0.6), "requires": ""},
 ]
 
@@ -40,7 +43,7 @@ var _building_menu_open: bool = false
 var _building_can_sell: bool = false
 const BUILDING_BUTTONS := [
 	{"id": "evict", "label": "Evict All", "color": Color(0.8, 0.6, 0.3)},
-	{"id": "sell", "label": "Sell ($2)", "color": Color(0.9, 0.3, 0.3)},
+	{"id": "sell", "label": "Sell", "color": Color(0.9, 0.3, 0.3)},
 ]
 
 ## Selected villager info
@@ -136,8 +139,20 @@ func _unhandled_input(event: InputEvent) -> void:
 				_pending_command = "move"
 			elif cmd_id == "break_door":
 				_pending_command = "break_door"
+			elif cmd_id == "attack":
+				_pending_command = "attack"
+			elif cmd_id == "stun":
+				_pending_command = "stun"
 			else:
 				command_issued.emit(cmd_id)
+			get_viewport().set_input_as_handled()
+			return
+
+	# Tutorial Reset button click
+	if TutorialManager.active and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var reset_rect := _get_tutorial_reset_rect(vp_size)
+		if reset_rect.has_point(event.position):
+			_restart_tutorial()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -236,6 +251,10 @@ func _get_building_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
 func _draw() -> void:
 	var vp_size: Vector2 = get_viewport_rect().size
 
+	# ── Tutorial overlay ────────────────────────────────────────
+	if TutorialManager.active:
+		_draw_tutorial_overlay(vp_size)
+
 	# ── Day/Night bar ────────────────────────────────────────────
 	draw_rect(Rect2(0, 0, vp_size.x, BAR_HEIGHT), Color(0.08, 0.08, 0.1, 0.85))
 	var day_frac: float = GameClock.DAY_DURATION / GameClock.CYCLE_DURATION
@@ -270,7 +289,7 @@ func _draw() -> void:
 
 	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 56), "Enemies: %d" % pop_enemies,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.2, 0.2))
-	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 80), "Pop: %d / %d" % [pop_total, FactionManager.max_population],
+	draw_string(ThemeDB.fallback_font, Vector2(250, panel_y + 80), "Pop: %d / %d" % [pop_total, pop_max_effective],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.65, 0.65, 0.65))
 
 	# Per-faction resources
@@ -405,13 +424,23 @@ func _draw_building_menu(vp_size: Vector2) -> void:
 				Vector2(icon_cx + 32, icon_cy - 8),
 				Vector2(icon_cx - 32, icon_cy - 8)]),
 				Color(0.6, 0.2, 0.15, 0.8))
-		else:
+		elif btype == "Church":
 			draw_rect(Rect2(icon_cx - 20, icon_cy - 8, 40, 32), Color(0.35, 0.38, 0.5, 0.8))
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(icon_cx, icon_cy - 40),
 				Vector2(icon_cx + 13, icon_cy - 8),
 				Vector2(icon_cx - 13, icon_cy - 8)]),
 				Color(0.3, 0.35, 0.55, 0.8))
+		elif btype == "Bank":
+			draw_rect(Rect2(icon_cx - 26, icon_cy - 14, 52, 30), Color(0.4, 0.38, 0.32, 0.8))
+			draw_circle(Vector2(icon_cx, icon_cy), 10.0, Color(0.5, 0.52, 0.48, 0.8))
+		elif btype == "Fishing Hut":
+			draw_rect(Rect2(icon_cx - 26, icon_cy - 10, 52, 26), Color(0.3, 0.25, 0.2, 0.8))
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(icon_cx, icon_cy - 36),
+				Vector2(icon_cx + 30, icon_cy - 10),
+				Vector2(icon_cx - 30, icon_cy - 10)]),
+				Color(0.25, 0.35, 0.5, 0.8))
 
 		draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 116), btype,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.85, 0.85, 0.85))
@@ -426,12 +455,23 @@ func _draw_building_menu(vp_size: Vector2) -> void:
 	var cmd_x: float = px + panel_w - 140.0
 	draw_string(ThemeDB.fallback_font, Vector2(cmd_x, py + 18), "ACTIONS",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
+
+	# Compute dynamic sell value
+	var sell_item_id: String = ""
+	var btype_for_sell: String = selected_building_info.get("type", "")
+	if btype_for_sell == "Home": sell_item_id = "house"
+	elif btype_for_sell == "Church": sell_item_id = "church"
+	elif btype_for_sell == "Bank": sell_item_id = "bank"
+	elif btype_for_sell == "Fishing Hut": sell_item_id = "fishing_hut"
+	var sell_val: int = Economy.get_sell_value(sell_item_id)
+	var is_preplaced: bool = (selected_building_info.get("faction_id", -1) == -2)
+
 	for i in BUILDING_BUTTONS.size():
 		var btn: Dictionary = BUILDING_BUTTONS[i]
 		var iy: float = py + 28.0 + i * 50.0
 		var hovered: bool = (_cmd_hover == btn["id"])
 		var is_sell: bool = (btn["id"] == "sell")
-		var disabled: bool = is_sell and not _building_can_sell
+		var disabled: bool = is_sell and (not _building_can_sell or is_preplaced)
 		var bg: Color
 		if disabled: bg = Color(0.2, 0.2, 0.2, 0.3)
 		else:
@@ -439,14 +479,20 @@ func _draw_building_menu(vp_size: Vector2) -> void:
 			bg.a = 0.8 if hovered else 0.5
 		draw_rect(Rect2(cmd_x, iy, 120, 40), bg)
 		draw_rect(Rect2(cmd_x, iy, 120, 40), Color(0.5, 0.5, 0.5, 0.4), false, 1.0)
-		var label_text: String = btn["label"] if not disabled else "Conquered"
+		var label_text: String
+		if is_sell:
+			if is_preplaced: label_text = "Pre-placed"
+			elif disabled: label_text = "Conquered"
+			else: label_text = "Sell ($%d)" % sell_val
+		else:
+			label_text = btn["label"]
 		var text_col: Color = Color(0.4, 0.4, 0.4) if disabled else (Color(1, 1, 1, 0.95) if hovered else Color(0.9, 0.9, 0.9, 0.8))
 		draw_string(ThemeDB.fallback_font, Vector2(cmd_x + 10, iy + 27), label_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, text_col)
 
 
 func _draw_score(vp_size: Vector2) -> void:
-	var sw: float = 500.0
+	var sw: float = 580.0
 	var sh: float = 60.0 + score_data.size() * 50.0
 	var sx: float = (vp_size.x - sw) * 0.5
 	var sy: float = 100.0
@@ -462,31 +508,42 @@ func _draw_score(vp_size: Vector2) -> void:
 	var hy: float = sy + 48.0
 	draw_string(ThemeDB.fallback_font, Vector2(sx + 20, hy), "Faction", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
 	draw_string(ThemeDB.fallback_font, Vector2(sx + 140, hy), "Pop", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
-	draw_string(ThemeDB.fallback_font, Vector2(sx + 220, hy), "Stone", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
-	draw_string(ThemeDB.fallback_font, Vector2(sx + 300, hy), "Fish", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
-	draw_string(ThemeDB.fallback_font, Vector2(sx + 380, hy), "Rooms", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 210, hy), "Stone", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 290, hy), "Fish", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 360, hy), "Rooms", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
+	draw_string(ThemeDB.fallback_font, Vector2(sx + 440, hy), "Score", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.5, 0.55))
 
 	for i in score_data.size():
 		var sd: Dictionary = score_data[i]
 		var ry: float = sy + 68.0 + i * 50.0
 		var row_col: Color = sd.get("color", Color.WHITE)
 		var is_local: bool = (sd.get("faction_id", -1) == FactionManager.local_faction_id)
+		var is_elim: bool = sd.get("eliminated", false)
 		if is_local:
 			draw_rect(Rect2(sx + 5, ry - 16, sw - 10, 44), Color(row_col.r, row_col.g, row_col.b, 0.12))
+		if is_elim:
+			draw_rect(Rect2(sx + 5, ry - 16, sw - 10, 44), Color(0.3, 0.1, 0.1, 0.3))
 
+		var name_col: Color = Color(0.4, 0.35, 0.35) if is_elim else Color(0.75, 0.75, 0.75)
 		draw_string(ThemeDB.fallback_font, Vector2(sx + 20, ry + 10),
 			str(sd.get("symbol", "?")), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, row_col)
 		draw_string(ThemeDB.fallback_font, Vector2(sx + 60, ry + 6),
-			str(sd.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+			str(sd.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, name_col)
 
-		draw_string(ThemeDB.fallback_font, Vector2(sx + 140, ry + 6),
-			str(sd.get("pop", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.8, 0.8))
-		draw_string(ThemeDB.fallback_font, Vector2(sx + 220, ry + 6),
-			str(sd.get("stone", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.65, 0.55))
-		draw_string(ThemeDB.fallback_font, Vector2(sx + 300, ry + 6),
-			str(sd.get("fish", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.4, 0.65, 0.8))
-		draw_string(ThemeDB.fallback_font, Vector2(sx + 380, ry + 6),
-			str(sd.get("rooms", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.7, 0.7, 0.5))
+		if is_elim:
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 140, ry + 6),
+				"ELIMINATED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.3, 0.3))
+		else:
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 140, ry + 6),
+				str(sd.get("pop", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.8, 0.8))
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 210, ry + 6),
+				str(sd.get("stone", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.65, 0.55))
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 290, ry + 6),
+				str(sd.get("fish", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.4, 0.65, 0.8))
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 360, ry + 6),
+				str(sd.get("rooms", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.7, 0.7, 0.5))
+			draw_string(ThemeDB.fallback_font, Vector2(sx + 440, ry + 6),
+				str(sd.get("score", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.85, 0.75, 0.4))
 
 
 func _draw_feed(vp_size: Vector2) -> void:
@@ -555,3 +612,31 @@ func _draw_pop_line(x: float, y: float, label: String, count: int, col: Color) -
 	draw_circle(Vector2(x + 8, y - 4), 6.0, col)
 	draw_string(ThemeDB.fallback_font, Vector2(x + 20, y), "%s: %d" % [label, count],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.8, 0.8, 0.8))
+
+
+func _draw_tutorial_overlay(vp_size: Vector2) -> void:
+	var instruction: String = TutorialManager.get_current_instruction()
+	if instruction.is_empty():
+		return
+	var box_w: float = 600.0
+	var box_h: float = 62.0
+	var box_x: float = (vp_size.x - box_w) * 0.5
+	var box_y: float = BAR_HEIGHT + 8.0
+	draw_rect(Rect2(box_x, box_y, box_w, box_h), Color(0.0, 0.0, 0.0, 0.78))
+	draw_rect(Rect2(box_x, box_y, box_w, box_h), Color(0.9, 0.85, 0.4, 0.6), false, 1.5)
+	draw_string(ThemeDB.fallback_font, Vector2(box_x + 14, box_y + 24),
+		instruction, HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 16, Color(0.95, 0.9, 0.7))
+	draw_string(ThemeDB.fallback_font, Vector2(box_x + 14, box_y + 50),
+		"Phase %d / %d  |  Press Escape to skip tutorial" % [TutorialManager.current_phase, TutorialManager.PHASE_INSTRUCTIONS.size() - 1],
+		HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 12, Color(0.5, 0.5, 0.5))
+		# Reset button
+	var reset_rect := _get_tutorial_reset_rect(vp_size)
+	draw_rect(reset_rect, Color(0.5, 0.15, 0.1, 0.85))
+	draw_rect(reset_rect, Color(0.9, 0.4, 0.3, 0.7), false, 2.0)
+	draw_string(ThemeDB.fallback_font, Vector2(reset_rect.position.x + 16, reset_rect.position.y + 30), "RESET TUTORIAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 0.9, 0.8))
+func _get_tutorial_reset_rect(vp_size: Vector2) -> Rect2:
+	return Rect2(vp_size.x - 200, BAR_HEIGHT + 14, 170, 44)
+
+func _restart_tutorial() -> void:
+	TutorialManager.start_tutorial()
+	get_tree().change_scene_to_file("res://scenes/main.tscn")

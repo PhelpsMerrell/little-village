@@ -5,13 +5,13 @@ extends Node
 ## 3-second grace period before shift meter starts decaying.
 
 const SHIFT_MAX := 100.0
-const BASE_SHIFT_SPEED := 18.0
+const BASE_SHIFT_SPEED := 9.0
 const DECAY_MULTIPLIER := 1.3
 const INFLUENCE_RANGE_MULT := 15.0   # Red=420px, Yellow=330px, Blue=540px
 const MIN_PROXIMITY_FACTOR := 0.15
 const DECAY_GRACE_PERIOD := 3.0      # seconds before decay starts
 
-signal villager_shifted(villager: Node, old_color: String, new_color: String, spawn_count: int)
+signal villager_shifted(villager: Node, old_color: String, new_color: String, spawn_count: int, faction_override: int)
 
 
 func process_influence(room_villagers: Dictionary, wall_data: Array, delta: float) -> void:
@@ -62,7 +62,10 @@ func _proximity_factor(src_pos: Vector2, tgt_pos: Vector2, src_radius: float) ->
 func _level_multiplier(src_level: int, target: Node) -> float:
 	var tgt_level: int = target.level
 	if target.color_type == "yellow" and tgt_level == 3: return 1.0
-	if tgt_level == 3: return 0.0
+	if tgt_level == 3:
+		if src_level == 3:
+			return 0.2  ## L3 vs L3: very slow shift
+		return 0.0       ## L1/L2 cannot shift L3
 	if src_level < tgt_level: return 0.0
 	if tgt_level == 2: return 0.2
 	return 1.0
@@ -79,12 +82,14 @@ func _process_group(villagers: Array, delta: float) -> void:
 	var attractor_weight: Dictionary = {}
 	var dominant_color: Dictionary = {}  # villager -> strongest influencer color
 	var dominant_strength: Dictionary = {}  # villager -> strength of dominant
+	var dominant_faction: Dictionary = {}  # villager -> faction of dominant influencer src
 	for v in villagers:
 		inf_rate[v] = 0.0
 		attractor_sum[v] = Vector2.ZERO
 		attractor_weight[v] = 0.0
 		dominant_color[v] = ""
 		dominant_strength[v] = 0.0
+		dominant_faction[v] = -1
 
 	var by_color: Dictionary = {}
 	for v in villagers:
@@ -125,6 +130,7 @@ func _process_group(villagers: Array, delta: float) -> void:
 					if contrib > dominant_strength.get(t, 0.0):
 						dominant_strength[t] = contrib
 						dominant_color[t] = src_color
+						dominant_faction[t] = src.faction_id
 					claimed[t] = true; break
 		else:
 			for t in color_valid_targets:
@@ -144,6 +150,15 @@ func _process_group(villagers: Array, delta: float) -> void:
 				if total > dominant_strength.get(t, 0.0):
 					dominant_strength[t] = total
 					dominant_color[t] = src_color
+					# For standard delivery, find the closest src to track faction
+					var best_src_fid: int = -1
+					var best_prox2: float = -1.0
+					for src2 in src_list:
+						var p2: float = _proximity_factor(src2.global_position, t.global_position, src_radius)
+						if p2 > best_prox2:
+							best_prox2 = p2
+							best_src_fid = src2.faction_id
+					dominant_faction[t] = best_src_fid
 
 	var shift_queue: Array = []
 	for v in villagers:
@@ -155,10 +170,11 @@ func _process_group(villagers: Array, delta: float) -> void:
 			var shift_mult: float = 3.0 if vdef.get("fast_shifter", false) else 1.0
 			v.shift_meter += rate * BASE_SHIFT_SPEED * shift_mult * delta
 			v._decay_grace_timer = DECAY_GRACE_PERIOD
-			# Track dominant influencer color for colorless dynamic shifting
+			# Track dominant influencer color and faction for colorless dynamic shifting
 			var dom: String = dominant_color.get(v, "")
 			if dom != "" and v.color_type == "colorless":
 				v.pending_shift_color = dom
+				v.set("_dominant_influencer_faction", dominant_faction.get(v, -1))
 			var w: float = attractor_weight.get(v, 0.0)
 			if w > 0.0:
 				v.is_being_influenced = true
@@ -195,7 +211,12 @@ func _trigger_shift(v: Node) -> void:
 	if new_color.is_empty():
 		v.shift_meter = 0.0; return
 	v.shift_meter = 0.0
-	villager_shifted.emit(v, old_color, new_color, spawn_count)
+	# For colorless: pass the faction of the dominant influencer
+	var faction_override: int = v.faction_id
+	if old_color == "colorless":
+		# _dominant_influencer_faction is set during group processing
+		faction_override = v.get("_dominant_influencer_faction") if v.get("_dominant_influencer_faction") != null else v.faction_id
+	villager_shifted.emit(v, old_color, new_color, spawn_count, faction_override)
 
 
 func process_building_group(villagers: Array, delta: float) -> void:
