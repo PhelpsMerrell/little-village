@@ -332,28 +332,29 @@ func _draw() -> void:
 
 
 func _draw_selection_panel(vp_size: Vector2) -> void:
-	## Side-by-side: villager info on left, commands on right, bottom-right corner
+	## Villager info on left, commands on right, faction identity at bottom.
 	var filtered := _get_filtered_commands()
 	var panel_w: float = 380.0
-	var panel_h: float = 240.0
+	var panel_h: float = 280.0
 	var px: float = vp_size.x - panel_w - 10.0
 	var py: float = vp_size.y - panel_h - 10.0
 
 	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.06, 0.06, 0.08, 0.88))
 	draw_rect(Rect2(px, py, panel_w, panel_h), Color(0.4, 0.4, 0.4, 0.3), false, 1.0)
 
-	# Left side: selection summary
 	var info_x: float = px + 10.0
 	var total: int = selected_villager_info.size()
+
+	# ── Header ──────────────────────────────────────────────────
 	draw_string(ThemeDB.fallback_font, Vector2(info_x, py + 18), "SELECTED (%d)" % total,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
 
-	# Per-type counts
+	# ── Per-type counts ──────────────────────────────────────────
 	var type_counts: Dictionary = {}
 	for info in selected_villager_info:
 		var ct: String = info.get("color_type", "unknown")
 		type_counts[ct] = type_counts.get(ct, 0) + 1
-	var ty: float = py + 36.0
+	var ty: float = py + 30.0
 	for ct in type_counts:
 		var def: Dictionary = ColorRegistry.get_def(ct)
 		var col: Color = def.get("display_color", Color.WHITE)
@@ -361,23 +362,52 @@ func _draw_selection_panel(vp_size: Vector2) -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(info_x + 20, ty + 12),
 			"%s: %d" % [ct.capitalize(), type_counts[ct]],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.85, 0.85))
-		ty += 28.0
+		ty += 24.0
 
-	# Show individual villager details if small selection
+	# ── Individual villager details (small selections) ───────────
 	if total <= 4:
-		ty += 4.0
+		ty += 2.0
 		for info in selected_villager_info:
-			if ty > py + panel_h - 20.0:
+			if ty > py + panel_h - 72.0:  # leave room for faction block
 				break
 			var col: Color = info.get("display_color", Color.WHITE)
 			var hp: int = int(info.get("health", 0))
 			var max_hp: int = int(info.get("max_health", 1))
 			draw_string(ThemeDB.fallback_font, Vector2(info_x + 4, ty + 12),
-				"%s HP:%d/%d" % [str(info.get("name", "")), hp, max_hp],
+				"%s  HP:%d/%d" % [str(info.get("name", "")), hp, max_hp],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col.lightened(0.3))
-			ty += 22.0
+			ty += 20.0
 
-	# Right side: filtered commands
+	# ── Faction identity block — bottom of panel ─────────────────
+	var faction_ids: Dictionary = {}
+	for info in selected_villager_info:
+		faction_ids[info.get("faction_id", -1)] = true
+
+	var faction_block_y: float = py + panel_h - 62.0
+	draw_line(Vector2(px + 8, faction_block_y - 4), Vector2(px + panel_w * 0.55 - 8, faction_block_y - 4),
+		Color(0.3, 0.3, 0.35, 0.6), 1.0)
+
+	if faction_ids.size() == 1 and not selected_villager_info.is_empty():
+		var fc: Color = selected_villager_info[0].get("faction_color", Color(0.5, 0.5, 0.5))
+		var fsym: String = selected_villager_info[0].get("faction_symbol", "?")
+		var fid: int = faction_ids.keys()[0]
+		var fname: String = FactionManager.get_faction_name(fid) if fid >= 0 else "Unknown"
+		# Tinted background strip
+		draw_rect(Rect2(px, faction_block_y, panel_w * 0.57, 62), Color(fc.r, fc.g, fc.b, 0.14))
+		# Large symbol
+		draw_string(ThemeDB.fallback_font, Vector2(info_x, faction_block_y + 48),
+			fsym, HORIZONTAL_ALIGNMENT_LEFT, -1, 40, fc)
+		# Faction name beside symbol
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 46, faction_block_y + 24),
+			"FACTION", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(fc.r, fc.g, fc.b, 0.6))
+		draw_string(ThemeDB.fallback_font, Vector2(info_x + 46, faction_block_y + 46),
+			fname, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, fc)
+	else:
+		# Mixed factions
+		draw_string(ThemeDB.fallback_font, Vector2(info_x, faction_block_y + 40),
+			"Mixed Factions", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.6, 0.5, 0.3))
+
+	# ── Commands (right column) ───────────────────────────────────
 	var cmd_x: float = px + panel_w - 140.0
 	draw_string(ThemeDB.fallback_font, Vector2(cmd_x, py + 18), "COMMANDS",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.65))
@@ -631,7 +661,7 @@ func _draw_tutorial_overlay(vp_size: Vector2) -> void:
 		instruction, HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 16, Color(0.95, 0.9, 0.7))
 	var phase_max: int = TutorialManager.PHASE_INSTRUCTIONS.size() - 1
 	draw_string(ThemeDB.fallback_font, Vector2(box_x + 14, box_y + 50),
-		"Phase %d / %d  |  Press Escape to skip tutorial" % [TutorialManager.current_phase, phase_max],
+		"Phase %d / %d  |  Press Escape to open menu (Quit to Main Menu available there)" % [TutorialManager.current_phase, phase_max],
 		HORIZONTAL_ALIGNMENT_LEFT, int(box_w - 28), 12, Color(0.5, 0.5, 0.5))
 	# Reset button
 	var reset_rect := _get_tutorial_reset_rect(vp_size)

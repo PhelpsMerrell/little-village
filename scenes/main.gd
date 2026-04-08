@@ -411,6 +411,7 @@ func _process(delta: float) -> void:
 	_update_fog_and_camera()
 	_update_obstacles()
 	_update_brain_context()
+	_update_door_hover()
 	_process_stone_pickups()
 	_process_fish_pickups()
 	_process_deposits()
@@ -434,6 +435,7 @@ func _process(delta: float) -> void:
 		wall_data.append({"room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": w.is_open})
 
 	_process_red_door_breaking()
+	# Door keyboard shortcut already sets _hud._pending_command = "break_door"
 	if TutorialManager.active:
 		var tut_state := {}
 		var doors_open: Array = []
@@ -596,7 +598,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				best_d = d
 				best_door = w
 		if best_door:
-			_player.command_break_door(best_door.get_midpoint())
+			_player.command_break_door(best_door.get_midpoint(), best_door)
 		else:
 			EventFeed.push("No closed door nearby.", Color(0.7, 0.5, 0.3))
 		_hud.clear_pending_command()
@@ -648,6 +650,39 @@ func _unhandled_input(event: InputEvent) -> void:
 		_player.clear_resource_selection()
 		return
 
+	# Reverse door selection: door selected, click a red villager to assign break-door
+	if _player.has_door_selection():
+		var sel_door: Node = _player.selected_door
+		for v in villagers:
+			if not is_instance_valid(v) or not v.visible:
+				continue
+			if v.faction_id != _player.faction_id:
+				continue
+			if str(v.color_type) != "red":
+				continue
+			if click_pos.distance_to(v.global_position) < float(v.radius) + 10.0:
+				# Assign this red villager to break the selected door
+				_player.deselect_door()
+				_player.select_villager(v, false)
+				_player.command_break_door(sel_door.get_midpoint(), sel_door)
+				_hud.set_command_menu_visible(false)
+				get_viewport().set_input_as_handled()
+				return
+		# Click missed a red villager — check if they clicked a different door
+		var clicked_other_door: bool = false
+		for w in walls:
+			if not w.is_door or w.is_open or w == sel_door:
+				continue
+			if click_pos.distance_to(w.get_midpoint()) < 40.0:
+				_player.select_door(w)
+				EventFeed.push("Door selected. Click a red villager to break it.", Color(0.9, 0.5, 0.2))
+				get_viewport().set_input_as_handled()
+				clicked_other_door = true
+				return
+		if not clicked_other_door:
+			_player.deselect_door()
+		return
+
 	for c in collectables:
 		if not is_instance_valid(c) or c.collected:
 			continue
@@ -660,6 +695,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			continue
 		if click_pos.distance_to(f.global_position) < 20.0:
 			_player.set_resource_selection(f, "fish")
+			get_viewport().set_input_as_handled()
+			return
+
+	# Door click: select door for reverse break-door assignment
+	for w in walls:
+		if not w.is_door or w.is_open:
+			continue
+		if click_pos.distance_to(w.get_midpoint()) < 40.0:
+			_player.select_door(w)
+			EventFeed.push("Door selected. Click a red villager to break it.", Color(0.9, 0.5, 0.2))
 			get_viewport().set_input_as_handled()
 			return
 
@@ -688,6 +733,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _player.has_building_selection():
 		_player.deselect_building()
 		_hud.set_building_menu_visible(false)
+	if _player.has_door_selection():
+		_player.deselect_door()
 
 
 
@@ -939,11 +986,20 @@ func _apply_net_command(cmd: Dictionary) -> void:
 			_apply_house_command(cmd_villagers)
 		"break_door":
 			var target: Vector2 = Vector2(cmd.get("tx", 0.0), cmd.get("ty", 0.0))
+			# Find the actual door node near the target position
+			var door_node: Node = null
+			for w in walls:
+				if w.is_door and not w.is_open and w.get_midpoint().distance_to(target) < 80.0:
+					door_node = w
+					break
 			for nid in net_ids:
 				var v: Node = _find_villager_by_net_id(int(nid))
 				if v and str(v.color_type) == "red":
-					v.command_move_to(target)
+					v.command_mode = "break_door"
+					v.command_target = target
 					v.break_door_target = target
+					v.break_door_node = door_node
+					v._arrived = false
 		"build_place":
 			var item_id: String = cmd.get("item_id", "")
 			var bpos := Vector2(float(cmd.get("px", 0.0)), float(cmd.get("py", 0.0)))
@@ -1078,14 +1134,29 @@ func _room_id_at(pos: Vector2) -> int:
 # BRAIN CONTEXT
 # ==============================================================================
 
+func _update_door_hover() -> void:
+	## Update hover state on doors based on current mouse position.
+	var mp: Vector2 = get_global_mouse_position()
+	for w in walls:
+		if not w.is_door or w.is_open:
+			w.set_hovered(false) if w.has_method("set_hovered") else null
+			continue
+		w.set_hovered(mp.distance_to(w.get_midpoint()) < 45.0)
+
+
 func _update_brain_context() -> void:
 	# Build wall data once per frame for villager collision
 	var wall_info: Array = []
-	var doorway_info: Array = []  # [{mid: Vector2, room_a: int, room_b: int}]
+	var doorway_info: Array = []  # [{mid: Vector2, room_a: int, room_b: int, is_open: bool}]
 	for w in walls:
-		wall_info.append({"start": w.start_pos, "end": w.end_pos, "is_open": w.is_open})
-		if w.is_door or w.is_open:
-			doorway_info.append({"mid": (w.start_pos + w.end_pos) * 0.5, "room_a": w.room_a_id, "room_b": w.room_b_id})
+		wall_info.append({"start": w.start_pos, "end": w.end_pos, "is_open": w.is_open, "is_door": w.is_door})
+		if w.is_door:
+			# Include all doors in doorway_info (both open and closed)
+			# is_open flag tells villager if it can actually pass through
+			doorway_info.append({"mid": (w.start_pos + w.end_pos) * 0.5, "room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": w.is_open})
+		elif w.is_open:
+			# Non-door that is open (shouldn't happen, but defensive)
+			doorway_info.append({"mid": (w.start_pos + w.end_pos) * 0.5, "room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": true})
 
 	for v in villagers:
 		var rid: int = v.current_room_id
@@ -1217,10 +1288,12 @@ func _process_red_door_breaking() -> void:
 				w.break_door()
 				EventFeed.push("A red villager broke open a door!", Color(0.9, 0.5, 0.3))
 				TutorialManager.on_door_broken()
-				# Clear break_door_target if this was the target
-				if v.break_door_target != Vector2.ZERO and v.break_door_target.distance_to(mid) < 80.0:
+				# Clear break_door command if this was the target
+				if v.command_mode == "break_door" and v.break_door_target.distance_to(mid) < 80.0:
+					v.command_mode = "none"
 					v.break_door_target = Vector2.ZERO
-					v.command_release()
+					v.break_door_node = null
+					v._arrived = true
 
 
 func _process_stone_pickups() -> void:
@@ -1869,6 +1942,9 @@ func _update_hud() -> void:
 				"shift": v.shift_meter,
 				"color_type": str(v.color_type),
 				"display_color": def.get("display_color", Color.WHITE),
+				"faction_id": v.faction_id,
+				"faction_color": FactionManager.get_faction_color(v.faction_id) if v.faction_id >= 0 else Color(0.5, 0.5, 0.5),
+				"faction_symbol": FactionManager.get_faction_symbol(v.faction_id) if v.faction_id >= 0 else "?",
 			})
 
 	# Populate selected building info
@@ -2409,6 +2485,14 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(sp.x - 40, sp.y - 24),
 			"Click a %s villager" % hint_color,
 			HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.9, 0.9, 0.8, pulse))
+
+	# Door selection hint
+	if _player.has_door_selection():
+		var dp: Vector2 = _player.selected_door.get_midpoint()
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.007) * 0.4
+		draw_string(ThemeDB.fallback_font, Vector2(dp.x - 70, dp.y - 30),
+			"Click a RED villager to break",
+			HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(1.0, 0.65, 0.1, pulse))
 
 	# Remote cursors
 	_draw_remote_cursors()

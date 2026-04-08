@@ -27,7 +27,7 @@ const PHASE_INSTRUCTIONS: Array[String] = [
 	"Phase 5 — Fish: Blue villagers auto-collect fish. Walk one near fish, then to the fishing hut.",
 	"Phase 6 — Break Door: Move a red villager to the closed door to break it open!",
 	"Phase 7 — Combat: Send a red villager near an enemy — reds shoot automatically!",
-	"Phase 8 — Tutorial Complete! Press Escape or click Reset to return to title.",
+	"Phase 8 — Tutorial Complete! Press Escape > 'Quit to Main Menu' to return to the title screen.",
 ]
 
 const PHASE_COMPLETE_MSG: Array[String] = [

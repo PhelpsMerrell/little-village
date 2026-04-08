@@ -77,6 +77,9 @@ func _input(event: InputEvent) -> void:
 			"close":
 				close()
 				get_viewport().set_input_as_handled()
+			"main_menu":
+				get_viewport().set_input_as_handled()
+				_quit_to_main_menu()
 			"exit":
 				get_tree().root.propagate_notification(NOTIFICATION_WM_CLOSE_REQUEST)
 				get_tree().quit()
@@ -108,6 +111,15 @@ func _get_row_at(pos: Vector2) -> int:
 	return -1
 
 
+func _quit_to_main_menu() -> void:
+	## Clean up session state and return to title screen.
+	TutorialManager.active = false
+	TutorialManager.current_phase = 0
+	TutorialManager._pending_advance = false
+	SaveManager.delete_save()
+	get_tree().change_scene_to_file("res://scenes/title_screen.tscn")
+
+
 func _get_btn_at(pos: Vector2) -> String:
 	var vp: Vector2 = get_viewport_rect().size
 	var cx: float = vp.x * 0.5
@@ -120,8 +132,9 @@ func _get_btn_at(pos: Vector2) -> String:
 	var left_x: float = cx - 200.0
 	if Rect2(left_x, btn_y, btn_w, btn_h).has_point(pos): return "reset_keys"
 	if Rect2(left_x, btn_y + gap, btn_w, btn_h).has_point(pos): return "close"
-	if Rect2(left_x, btn_y + gap * 2, btn_w, btn_h).has_point(pos): return "exit"
-	if Rect2(left_x, btn_y + gap * 3, btn_w, btn_h).has_point(pos): return "dev_mode"
+	if Rect2(left_x, btn_y + gap * 2, btn_w, btn_h).has_point(pos): return "main_menu"
+	if Rect2(left_x, btn_y + gap * 3, btn_w, btn_h).has_point(pos): return "exit"
+	if Rect2(left_x, btn_y + gap * 4, btn_w, btn_h).has_point(pos): return "dev_mode"
 
 	# Right column: dev tools (host only)
 	if NetworkManager.is_authority():
@@ -183,10 +196,11 @@ func _draw() -> void:
 	var left_x: float = cx - 200.0
 	_draw_button(left_x, btn_y, btn_w, btn_h, "Reset Keys", "reset_keys", Color(0.5, 0.3, 0.3))
 	_draw_button(left_x, btn_y + gap, btn_w, btn_h, "Close", "close", Color(0.3, 0.5, 0.3))
-	_draw_button(left_x, btn_y + gap * 2, btn_w, btn_h, "Exit to Desktop", "exit", Color(0.6, 0.15, 0.15))
+	_draw_button(left_x, btn_y + gap * 2, btn_w, btn_h, "Quit to Main Menu", "main_menu", Color(0.35, 0.25, 0.15))
+	_draw_button(left_x, btn_y + gap * 3, btn_w, btn_h, "Exit to Desktop", "exit", Color(0.6, 0.15, 0.15))
 	var dev_label: String = "Dev Mode: ON" if _dev_mode_on else "Dev Mode: OFF"
 	var dev_col: Color = Color(0.45, 0.2, 0.55) if _dev_mode_on else Color(0.25, 0.2, 0.35)
-	_draw_button(left_x, btn_y + gap * 3, btn_w, btn_h, dev_label, "dev_mode", dev_col)
+	_draw_button(left_x, btn_y + gap * 4, btn_w, btn_h, dev_label, "dev_mode", dev_col)
 
 	# Right column: dev tools (host only)
 	if NetworkManager.is_authority():

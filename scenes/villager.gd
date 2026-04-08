@@ -104,10 +104,11 @@ var has_attract_target: bool = false
 
 ## Wall segments for collision (set by main.gd)
 var brain_walls: Array = []  # [{start: Vector2, end: Vector2, is_open: bool}]
-var brain_doorways: Array = []  # [{mid: Vector2, room_a: int, room_b: int}]
+var brain_doorways: Array = []  # [{mid: Vector2, room_a: int, room_b: int, is_open: bool}]
 var _doorway_waypoint: Vector2 = Vector2.ZERO  # intermediate target to navigate through a door
 var _has_doorway_waypoint: bool = false
 var break_door_target: Vector2 = Vector2.ZERO  ## Set by break-door command; cleared after breaking
+var break_door_node: Node = null  ## Reference to the actual door node being targeted
 
 var shoot_target_pos: Vector2 = Vector2.ZERO
 var shoot_target_enemy: Node = null
@@ -265,12 +266,23 @@ func _check_command() -> bool:
 				_arrived = true
 			return true
 		"break_door":
-			_brain_state = "command_move"
-			_set_target(command_target)
-			# Clear when close enough (main.gd will handle the actual break)
-			if global_position.distance_to(command_target) < radius + 40.0:
+			# Validate door target is still valid (not already broken)
+			if is_instance_valid(break_door_node) and break_door_node.is_open:
+				# Door already open, command fulfilled
 				command_mode = "none"
+				break_door_node = null
+				break_door_target = Vector2.ZERO
 				_arrived = true
+				return true
+			_brain_state = "break_door"
+			var dist_to_door := global_position.distance_to(command_target)
+			if dist_to_door < radius + 50.0:
+				# In breaking range — stand still, main.gd handles the break
+				_arrived = true
+			else:
+				# Navigate toward door, bypassing wall blocking
+				_move_target = command_target
+				_arrived = false
 			return true
 		"hold":
 			_brain_state = "command_hold"
@@ -317,6 +329,8 @@ func _check_combat_command() -> bool:
 func command_move_to(pos: Vector2) -> void:
 	command_mode = "move_to"
 	command_target = pos
+	break_door_node = null
+	break_door_target = Vector2.ZERO
 
 func command_hold() -> void:
 	command_mode = "hold"
@@ -326,6 +340,7 @@ func command_release() -> void:
 	combat_target = null
 	combat_mode = ""
 	break_door_target = Vector2.ZERO
+	break_door_node = null
 
 func command_attack(target: Node) -> void:
 	combat_target = target
@@ -431,6 +446,19 @@ func _set_target_clamped(pos: Vector2) -> void:
 func _do_movement(delta: float) -> void:
 	if _arrived: return
 
+	# Break-door state: navigate straight to door, ignoring its wall segment
+	if _brain_state == "break_door":
+		var to_door := _move_target - global_position
+		var dist_d := to_door.length()
+		var step_d := _move_speed * delta
+		if dist_d <= step_d or dist_d < 5.0:
+			global_position = _move_target
+			_arrived = true
+		else:
+			# Move toward door ignoring wall blocking (the door IS the wall)
+			global_position += to_door.normalized() * step_d
+		return
+
 	# If we have a doorway waypoint, navigate to it first
 	var effective_target: Vector2 = _move_target
 	if _has_doorway_waypoint:
@@ -461,7 +489,7 @@ func _do_movement(delta: float) -> void:
 	else:
 		var new_pos: Vector2 = global_position + to_target.normalized() * step
 		var cross_room: bool = _brain_state in ["waypoint", "seek_church", "carry_wander", "deposit_cross", "attract", "command_move"]
-		if cross_room and command_mode != "break_door":
+		if cross_room:
 			if _wall_blocks(global_position, new_pos):
 				if _try_find_doorway_redirect(_move_target):
 					return
@@ -480,6 +508,9 @@ func _try_find_doorway_redirect(target: Vector2) -> bool:
 	var best_door: Vector2 = Vector2.ZERO
 	var best_score: float = INF
 	for door in brain_doorways:
+		# Only use open doors for traversal (closed doors block passage)
+		if not door.get("is_open", false):
+			continue
 		var dmid: Vector2 = door["mid"]
 		# Only consider doors we can reach without wall collision
 		if _wall_blocks(global_position, dmid):
@@ -522,7 +553,20 @@ func _try_slide_toward_nearest_door() -> bool:
 
 
 func _wall_blocks(from: Vector2, to: Vector2) -> bool:
-	## Returns true if moving from → to crosses any closed wall segment.
+	## Returns true if moving from → to crosses any impassable segment.
+	## Solid walls always block. Closed doors block regular traversal.
+	## Open doors are passable. Break_door movement bypasses this entirely.
+	for w in brain_walls:
+		if w["is_open"]:
+			continue  # Open: passable
+		if _segments_intersect(from, to, w["start"], w["end"]):
+			return true
+	return false
+
+
+func _wall_blocks_hard(from: Vector2, to: Vector2) -> bool:
+	## Returns true if from→to crosses any solid wall OR closed door (full blocking).
+	## Used for strict pass-through checks (not break_door pathing).
 	for w in brain_walls:
 		if w["is_open"]:
 			continue
@@ -655,7 +699,10 @@ func _draw() -> void:
 	# Faction ring — drawn before body so body renders on top
 	if faction_id >= 0:
 		var fcolor: Color = FactionManager.get_faction_color(faction_id)
-		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 32, fcolor, 4.0)
+		# Outer glow ring
+		draw_arc(Vector2.ZERO, radius + 9.0, 0.0, TAU, 40, Color(fcolor.r, fcolor.g, fcolor.b, 0.35), 6.0)
+		# Main faction ring
+		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 40, fcolor, 5.0)
 	match level:
 		1: _draw_circle_body(draw_color)
 		2: _draw_square_body(draw_color)
@@ -676,6 +723,10 @@ func _draw() -> void:
 	elif command_mode == "move_to":
 		var cmd_dir: Vector2 = (command_target - global_position).normalized()
 		draw_line(cmd_dir * (radius + 4.0), cmd_dir * (radius + 16.0), Color(0.2, 1.0, 0.4, 0.6), 2.0)
+	elif command_mode == "break_door":
+		var cmd_dir: Vector2 = (command_target - global_position).normalized()
+		draw_line(cmd_dir * (radius + 4.0), cmd_dir * (radius + 18.0), Color(1.0, 0.4, 0.1, 0.8), 2.5)
+		draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.6, -radius - 28.0), "BREAK", HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color(1.0, 0.4, 0.1, 0.9))
 	if is_being_influenced and shift_meter > 1.0 and _brain_state == "influence":
 		var dir: Vector2 = (influence_attractor - global_position).normalized()
 		draw_line(dir * (radius + 4.0), dir * (radius + 14.0), Color(1, 1, 1, 0.35), 2.0)
@@ -704,9 +755,12 @@ func _draw_faction_symbol() -> void:
 		return
 	var sym: String = FactionManager.get_faction_symbol(faction_id)
 	var fc: Color = FactionManager.get_faction_color(faction_id)
-	fc.a = 0.9
-	draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.5, radius * 0.35), sym,
-		HORIZONTAL_ALIGNMENT_CENTER, int(radius), 20, fc)
+	# Dark backing for readability
+	draw_circle(Vector2.ZERO, radius * 0.55, Color(0.0, 0.0, 0.0, 0.45))
+	fc.a = 1.0
+	var font_size: int = int(radius * 1.0)
+	draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.45, radius * 0.38), sym,
+		HORIZONTAL_ALIGNMENT_CENTER, int(radius), font_size, fc)
 
 func _draw_circle_body(col: Color) -> void:
 	draw_circle(Vector2.ZERO, radius, col)

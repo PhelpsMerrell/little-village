@@ -8,6 +8,7 @@ var selected_villagers: Array = []
 var _selected_resource: Node = null
 var _selected_resource_type: String = ""
 var selected_building: Node = null  ## Currently selected building (home or church)
+var selected_door: Node = null      ## Currently selected door for reverse break-door assignment
 var pending_combat_mode: String = ""  ## "attack" or "stun", set by HUD combat buttons
 
 
@@ -40,6 +41,7 @@ func deselect_all() -> void:
 			v.is_selected = false
 	selected_villagers.clear()
 	deselect_building()
+	deselect_door()
 
 
 func has_selection() -> bool:
@@ -62,6 +64,29 @@ func has_building_selection() -> bool:
 	if selected_building != null and is_instance_valid(selected_building):
 		return true
 	selected_building = null
+	return false
+
+
+func select_door(door: Node) -> void:
+	## Select a closed door for reverse break-door assignment.
+	deselect_door()
+	deselect_all()
+	selected_door = door
+	door.is_selected = true
+	door.queue_redraw()
+
+
+func deselect_door() -> void:
+	if selected_door != null and is_instance_valid(selected_door):
+		selected_door.is_selected = false
+		selected_door.queue_redraw()
+	selected_door = null
+
+
+func has_door_selection() -> bool:
+	if selected_door != null and is_instance_valid(selected_door) and not selected_door.is_open:
+		return true
+	deselect_door()
 	return false
 
 
@@ -241,7 +266,7 @@ func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Calla
 	return false
 
 
-func command_break_door(target_pos: Vector2) -> void:
+func command_break_door(target_pos: Vector2, door_node: Node = null) -> void:
 	## Send break-door command for selected red villagers.
 	if selected_villagers.is_empty():
 		return
@@ -262,12 +287,13 @@ func command_break_door(target_pos: Vector2) -> void:
 			"ty": target_pos.y,
 		})
 	else:
-		for nid in red_ids:
-			for v in selected_villagers:
-				if is_instance_valid(v) and v.net_id == nid:
-					v.command_mode = "break_door"
-					v.command_target = target_pos
-					v.break_door_target = target_pos
+		for v in selected_villagers:
+			if is_instance_valid(v) and str(v.color_type) == "red":
+				v.command_mode = "break_door"
+				v.command_target = target_pos
+				v.break_door_target = target_pos
+				v.break_door_node = door_node
+				v._arrived = false
 	EventFeed.push("Red sent to break door.", Color(0.9, 0.5, 0.3))
 
 
