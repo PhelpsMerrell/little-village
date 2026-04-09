@@ -60,6 +60,13 @@ signal building_command_issued(cmd_type: String)
 
 
 func _ready() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	offset_left = 0
+	offset_top = 0
+	offset_right = 0
+	offset_bottom = 0
+	position = Vector2.ZERO
+	scale = Vector2.ONE
 	_refresh_shop()
 	Economy.currency_changed.connect(func(): _refresh_shop())
 
@@ -119,6 +126,9 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var hud_size: Vector2 = size
+	var mouse_pos: Vector2 = get_local_mouse_position()
+
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.is_action_pressed("toggle_shop"):
 			_shop_open = not _shop_open
@@ -129,11 +139,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	var vp_size: Vector2 = get_viewport_rect().size
-
 	# Command menu clicks
 	if _cmd_menu_open and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var cmd_id: String = _get_cmd_at(event.position, vp_size)
+		var cmd_id: String = _get_cmd_at(mouse_pos, hud_size)
 		if cmd_id != "":
 			if cmd_id == "move":
 				_pending_command = "move"
@@ -150,15 +158,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Tutorial Reset button click
 	if TutorialManager.active and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var reset_rect := _get_tutorial_reset_rect(vp_size)
-		if reset_rect.has_point(event.position):
+		var reset_rect := _get_tutorial_reset_rect(hud_size)
+		if reset_rect.has_point(mouse_pos):
 			_restart_tutorial()
 			get_viewport().set_input_as_handled()
 			return
 
 	# Building menu clicks
 	if _building_menu_open and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var bcmd_id: String = _get_building_cmd_at(event.position, vp_size)
+		var bcmd_id: String = _get_building_cmd_at(mouse_pos, hud_size)
 		if bcmd_id != "":
 			if bcmd_id == "sell" and not _building_can_sell:
 				pass
@@ -169,8 +177,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Feed click
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var feed_rect := _get_feed_rect(vp_size)
-		if feed_rect.has_point(event.position):
+		var feed_rect := _get_feed_rect(hud_size)
+		if feed_rect.has_point(mouse_pos):
 			_feed_expanded = not _feed_expanded
 			_feed_scroll = 0
 			get_viewport().set_input_as_handled()
@@ -178,8 +186,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Feed scroll
 	if _feed_expanded and event is InputEventMouseButton:
-		var feed_rect := _get_feed_rect(vp_size)
-		if feed_rect.has_point(event.position):
+		var feed_rect := _get_feed_rect(hud_size)
+		if feed_rect.has_point(mouse_pos):
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 				_feed_scroll = mini(_feed_scroll + 1, maxi(0, EventFeed.messages.size() - FEED_VISIBLE_COUNT))
 				get_viewport().set_input_as_handled()
@@ -189,24 +197,24 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Feed + cmd hover
 	if event is InputEventMouseMotion:
-		var feed_rect := _get_feed_rect(vp_size)
-		_feed_hover = feed_rect.has_point(event.position)
+		var feed_rect := _get_feed_rect(hud_size)
+		_feed_hover = feed_rect.has_point(mouse_pos)
 		_cmd_hover = ""
 		if _cmd_menu_open:
-			_cmd_hover = _get_cmd_at(event.position, vp_size)
+			_cmd_hover = _get_cmd_at(mouse_pos, hud_size)
 		elif _building_menu_open:
-			_cmd_hover = _get_building_cmd_at(event.position, vp_size)
+			_cmd_hover = _get_building_cmd_at(mouse_pos, hud_size)
 
 	if not _shop_open:
 		return
 
-	var shop_x: float = vp_size.x - 320.0
+	var shop_x: float = hud_size.x - 320.0
 	var shop_y: float = 80.0
 	if event is InputEventMouseMotion:
 		_hover_idx = -1
 		for i in _shop_items.size():
 			var iy: float = shop_y + 50 + i * 70.0
-			if Rect2(shop_x, iy, 300, 60).has_point(event.position):
+			if Rect2(shop_x, iy, 300, 60).has_point(mouse_pos):
 				_hover_idx = i
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if _hover_idx >= 0 and _hover_idx < _shop_items.size():
@@ -226,11 +234,14 @@ func _get_feed_rect(vp_size: Vector2) -> Rect2:
 
 func _get_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
 	var filtered := _get_filtered_commands()
-	var bx: float = vp_size.x - 150.0
-	var by: float = vp_size.y - 222.0
+	var panel_w: float = 380.0
+	var panel_h: float = 280.0
+	var px: float = vp_size.x - panel_w - 10.0
+	var py: float = vp_size.y - panel_h - 10.0
+	var cmd_x: float = px + panel_w - 140.0
 	for i in filtered.size():
-		var iy: float = by + i * 42.0
-		if Rect2(bx, iy, 120, 36).has_point(pos):
+		var iy: float = py + 28.0 + i * 42.0
+		if Rect2(cmd_x, iy, 120, 36).has_point(pos):
 			return filtered[i]["id"]
 	return ""
 
@@ -249,7 +260,7 @@ func _get_building_cmd_at(pos: Vector2, vp_size: Vector2) -> String:
 
 
 func _draw() -> void:
-	var vp_size: Vector2 = get_viewport_rect().size
+	var vp_size: Vector2 = size
 
 	# ── Tutorial overlay ────────────────────────────────────────
 	if TutorialManager.active:
