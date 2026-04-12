@@ -8,6 +8,51 @@ radius = 60.0
 [node name="Bank" type="Node2D"]
 script = ExtResource("1_script")
 
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.4, 0.38, 0.32, 1)
+polygon = PackedVector2Array(-50, -30, 50, -30, 50, 30, -50, 30)
+
+[node name="Outline" type="Line2D" parent="."]
+points = PackedVector2Array(-50, -30, 50, -30, 50, 30, -50, 30, -50, -30)
+width = 2.0
+default_color = Color(0.28, 0.25, 0.2, 1)
+
+[node name="Stone1" type="Polygon2D" parent="."]
+position = Vector2(-15, 5)
+color = Color(0.5, 0.52, 0.48, 1)
+polygon = PackedVector2Array(-12, 0, -8.5, -9.6, 0, -12, 8.5, -9.6, 12, 0, 8.5, 9.6, 0, 12, -8.5, 9.6)
+
+[node name="Stone2" type="Polygon2D" parent="."]
+position = Vector2(10, 8)
+color = Color(0.45, 0.47, 0.43, 1)
+polygon = PackedVector2Array(-10, 0, -7, -7, 0, -10, 7, -7, 10, 0, 7, 7, 0, 10, -7, 7)
+
+[node name="Stone3" type="Polygon2D" parent="."]
+position = Vector2(0, -8)
+color = Color(0.52, 0.54, 0.5, 1)
+polygon = PackedVector2Array(-11, 0, -7.8, -7.8, 0, -11, 7.8, -7.8, 11, 0, 7.8, 7.8, 0, 11, -7.8, 7.8)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -22.0
+offset_top = -50.0
+offset_right = 22.0
+offset_bottom = -32.0
+mouse_filter = 2
+text = "BANK"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.8, 0.5, 1)
+
+[node name="StoredLabel" type="Label" parent="."]
+offset_left = -30.0
+offset_top = 34.0
+offset_right = 50.0
+offset_bottom = 50.0
+mouse_filter = 2
+text = "Stored: 0"
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.65, 0.65, 0.55, 1)
+
 [node name="InputArea" type="Area2D" parent="."]
 input_pickable = true
 

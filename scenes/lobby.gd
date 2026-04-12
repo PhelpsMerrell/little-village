@@ -9,6 +9,7 @@ var max_pop: int = 300
 var map_seed_text: String = ""
 var map_size: String = "medium"  ## "small", "medium", "large", "xl"
 var game_mode: String = "standard"  ## "standard" or "survival"
+var ai_count: int = 0  ## Number of AI opponents
 var _hover: String = ""
 
 const MAP_SIZES: Array[String] = ["small", "medium", "large", "xl"]
@@ -23,6 +24,12 @@ var _scene_changing: bool = false
 
 ## Which text field is active for typing: "seed", "address", or ""
 var _typing_field: String = ""
+
+## Client connection state
+var _connecting: bool = false
+var _connect_timer: float = 0.0
+var _connect_status: String = ""  ## status message shown on join screen
+const CONNECT_TIMEOUT := 8.0
 
 const MAX_PLAYERS := 8
 const MAX_FACTIONS := 8
@@ -49,7 +56,14 @@ func _exit_tree() -> void:
 		NetworkManager.connection_failed.disconnect(_on_connection_failed)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _connecting:
+		_connect_timer += delta
+		if _connect_timer >= CONNECT_TIMEOUT:
+			_connecting = false
+			_connect_status = "Connection timed out."
+			NetworkManager.disconnect_game()
+			_state = "config"
 	queue_redraw()
 
 
@@ -78,14 +92,50 @@ func _input(event: InputEvent) -> void:
 				join_address = join_address.substr(0, join_address.length() - 1)
 			elif _typing_field == "seed" and map_seed_text.length() > 0:
 				map_seed_text = map_seed_text.substr(0, map_seed_text.length() - 1)
+		elif _typing_field == "address" and (event.ctrl_pressed or event.meta_pressed) and event.keycode == KEY_V:
+			var pasted := DisplayServer.clipboard_get()
+			if pasted != "":
+				join_address = _sanitize_address(join_address + pasted).substr(0, 80)
+		elif _typing_field == "seed" and (event.ctrl_pressed or event.meta_pressed) and event.keycode == KEY_V:
+			var pasted := DisplayServer.clipboard_get()
+			if pasted != "":
+				map_seed_text = _sanitize_seed(map_seed_text + pasted).substr(0, 12)
 		elif event.unicode > 0 and _state == "config":
 			var ch: String = char(event.unicode)
-			if _typing_field == "address" and join_address.length() < 40:
-				if ch.is_valid_int() or ch == "." or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
-					join_address += ch
+			if _typing_field == "address" and join_address.length() < 80:
+				var candidate := _sanitize_address(ch)
+				if candidate != "":
+					join_address += candidate
 			elif _typing_field == "seed" and map_seed_text.length() < 12:
-				if ch.is_valid_int() or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
-					map_seed_text += ch
+				var seed_candidate := _sanitize_seed(ch)
+				if seed_candidate != "":
+					map_seed_text += seed_candidate
+
+
+func _sanitize_address(text: String) -> String:
+	var out := ""
+	for i in text.length():
+		var ch := text.substr(i, 1)
+		if ch.is_valid_int() \
+		or ch == "." \
+		or ch == ":" \
+		or ch == "-" \
+		or ch == "_" \
+		or ch == "[" \
+		or ch == "]" \
+		or (ch >= "a" and ch <= "z") \
+		or (ch >= "A" and ch <= "Z"):
+			out += ch
+	return out
+
+
+func _sanitize_seed(text: String) -> String:
+	var out := ""
+	for i in text.length():
+		var ch := text.substr(i, 1)
+		if ch.is_valid_int() or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
+			out += ch
+	return out
 
 
 func _handle_click(elem: String) -> void:
@@ -104,6 +154,10 @@ func _handle_click(elem: String) -> void:
 				player_count = mini(player_count + 1, MAX_PLAYERS)
 			"players_down":
 				player_count = maxi(player_count - 1, 2)
+			"ai_up":
+				ai_count = mini(ai_count + 1, MAX_FACTIONS - 1)
+			"ai_down":
+				ai_count = maxi(ai_count - 1, 0)
 			"maxpop_up":
 				max_pop = mini(max_pop + 50, 1000)
 			"maxpop_down":
@@ -152,6 +206,8 @@ func _handle_click(elem: String) -> void:
 
 	elif _state == "waiting_client":
 		if elem == "cancel":
+			_connecting = false
+			_connect_status = ""
 			NetworkManager.disconnect_game()
 			_state = "config"
 		elif elem == "ready":
@@ -170,7 +226,20 @@ func _on_start_pressed() -> void:
 			FactionManager.register_faction(solo_fid, FACTION_NAMES[solo_fid], FACTION_COLORS[solo_fid])
 			FactionManager.local_faction_id = solo_fid
 			FactionManager.game_mode = game_mode
-			_set_game_config(1)
+			# Register AI factions
+			var ai_fids: Array = []
+			var next_ai_slot: int = 0
+			for _i in ai_count:
+				while next_ai_slot == solo_fid:
+					next_ai_slot += 1
+				if next_ai_slot >= MAX_FACTIONS:
+					break
+				FactionManager.register_faction(next_ai_slot, FACTION_NAMES[next_ai_slot], FACTION_COLORS[next_ai_slot], true)
+				ai_fids.append(next_ai_slot)
+				next_ai_slot += 1
+			var total_factions: int = 1 + ai_fids.size()
+			FactionManager.set_meta("ai_factions", ai_fids)
+			_set_game_config(total_factions)
 			SaveManager.delete_save()
 			get_tree().change_scene_to_file("res://scenes/main.tscn")
 		"host":
@@ -184,8 +253,16 @@ func _on_start_pressed() -> void:
 			NetworkManager.broadcast_lobby_config(seed_val, MAX_FACTIONS, NetworkManager.synced_peer_factions, max_pop, map_size)
 			_state = "waiting_host"
 		"join":
+			if join_address.strip_edges() == "":
+				_connect_status = "Enter a host address first."
+				return
+			_connect_status = "Connecting..."
+			_connecting = true
+			_connect_timer = 0.0
 			var err := NetworkManager.join_game(join_address)
 			if err != OK:
+				_connecting = false
+				_connect_status = "Failed to create connection."
 				EventFeed.push("Failed to connect!", Color(0.9, 0.3, 0.3))
 				return
 			_state = "waiting_client"
@@ -206,8 +283,8 @@ func _launch_game() -> void:
 	FactionManager.max_population = max_pop
 	_set_game_config(fcount)
 	NetworkManager.broadcast_lobby_config(
-	hash(map_seed_text) if map_seed_text != "" else -1,
-	fcount, pfmap, max_pop, map_size)
+		hash(map_seed_text) if map_seed_text != "" else -1,
+		fcount, pfmap, max_pop, map_size)
 	NetworkManager.broadcast_start_game()
 	SaveManager.delete_save()
 
@@ -241,9 +318,12 @@ func _deferred_change_to_main() -> void:
 
 
 func _on_connection_succeeded() -> void:
-	pass
+	_connecting = false
+	_connect_status = ""
 
 func _on_connection_failed() -> void:
+	_connecting = false
+	_connect_status = "Connection failed — host unreachable."
 	_state = "config"
 
 
@@ -310,8 +390,12 @@ func _get_solo_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	# Game Mode toggle
 	var gm_y: float = top + 250
 	if Rect2(cx + 10, gm_y - 2, 160, 28).has_point(pos): return "toggle_game_mode"
+	# AI Opponents
+	var ai_y: float = top + 300
+	if Rect2(cx + 60, ai_y - 4, 40, 32).has_point(pos): return "ai_up"
+	if Rect2(cx + 110, ai_y - 4, 40, 32).has_point(pos): return "ai_down"
 	# Faction picker
-	var fy: float = top + 310
+	var fy: float = top + 360
 	for i in MAX_FACTIONS:
 		if Rect2(cx - 140 + i * 38, fy, 32, 32).has_point(pos): return "solo_f_%d" % i
 	# Start
@@ -451,8 +535,17 @@ func _draw_solo_config(vp: Vector2, cx: float, top: float) -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, gm_y + 16), gm_label,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7))
 
+	# AI Opponents
+	var ai_y: float = top + 300
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, ai_y + 18), "AI Opponents:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	draw_string(ThemeDB.fallback_font, Vector2(cx + 10, ai_y + 18), str(ai_count),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.95, 0.9, 0.7))
+	_draw_btn(cx + 60, ai_y - 4, 40, 32, "+", "ai_up")
+	_draw_btn(cx + 110, ai_y - 4, 40, 32, "-", "ai_down")
+
 	# Faction picker
-	var fy: float = top + 310
+	var fy: float = top + 360
 	var solo_fid: int = NetworkManager.synced_peer_factions.get(1, 0)
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fy - 6), "Faction:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.55, 0.55, 0.6))
@@ -514,7 +607,7 @@ func _draw_host_config(vp: Vector2, cx: float, top: float) -> void:
 
 
 func _draw_join_config(vp: Vector2, cx: float, top: float) -> void:
-	# Address field only
+	# Address field
 	var addr_y: float = top + 100
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 16), "Address:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
@@ -525,6 +618,24 @@ func _draw_join_config(vp: Vector2, cx: float, top: float) -> void:
 	var cur: String = "|" if active and int(Time.get_ticks_msec() / 500) % 2 == 0 else ""
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 22, addr_y + 14), join_address + cur,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.9, 0.9, 0.8))
+
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 50), "IPv6 example:  2601:abcd::1",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.4, 0.4, 0.45))
+
+	# Connection status message
+	if _connect_status != "":
+		var is_err: bool = _connect_status.contains("fail") or _connect_status.contains("timed") or _connect_status.contains("Enter")
+		var status_col: Color = Color(0.9, 0.35, 0.3) if is_err else Color(0.5, 0.7, 0.9)
+		if _connecting:
+			var dots: String = ".".repeat(int(_connect_timer * 2.0) % 4)
+			draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 80), _connect_status + dots,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, status_col)
+			# Show elapsed time
+			draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 100), "(%ds / %ds timeout)" % [int(_connect_timer), int(CONNECT_TIMEOUT)],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.45, 0.45, 0.5))
+		else:
+			draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 80), _connect_status,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, status_col)
 
 	_draw_start_btn(vp, cx, "JOIN")
 
@@ -546,6 +657,27 @@ func _draw_waiting(vp: Vector2, cx: float, is_host_view: bool) -> void:
 	var sorted_peers: Array[int] = NetworkManager.get_peers_sorted_by_slot()
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, 120), "%d player(s)" % sorted_peers.size(),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.5, 0.8, 0.5))
+
+	# ---- Lobby settings summary (visible to all) ----
+	var settings_x: float = cx + 60
+	var settings_y: float = 110.0
+	var lbl_col: Color = Color(0.5, 0.5, 0.55)
+	var val_col: Color = Color(0.8, 0.8, 0.7)
+	var s_font: int = 13
+	var ms_label: String = NetworkManager.synced_map_size.capitalize() if NetworkManager.synced_map_size != "" else "?"
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x, settings_y), "Map:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, lbl_col)
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x + 70, settings_y), ms_label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, val_col)
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x, settings_y + 20), "Max Pop:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, lbl_col)
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x + 70, settings_y + 20), str(NetworkManager.synced_max_population),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, val_col)
+	var seed_display: String = str(NetworkManager.synced_map_seed) if NetworkManager.synced_map_seed != -1 else "random"
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x, settings_y + 40), "Seed:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, lbl_col)
+	draw_string(ThemeDB.fallback_font, Vector2(settings_x + 70, settings_y + 40), seed_display,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, s_font, val_col)
 
 	var list_y: float = 150.0
 	var my_pid: int = NetworkManager.get_my_peer_id()

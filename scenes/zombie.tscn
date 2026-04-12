@@ -3,10 +3,60 @@
 [ext_resource type="Script" path="res://scenes/zombie.gd" id="1_script"]
 
 [sub_resource type="CircleShape2D" id="1_shape"]
-radius = 26.0
+radius = 32.0
 
 [node name="Zombie" type="Node2D"]
 script = ExtResource("1_script")
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.2, 0.4, 0.15, 1)
+polygon = PackedVector2Array(-32, 0, -22.6, -22.6, 0, -32, 22.6, -22.6, 32, 0, 22.6, 22.6, 0, 32, -22.6, 22.6)
+
+[node name="BodyOutline" type="Line2D" parent="."]
+points = PackedVector2Array(-32, 0, -22.6, -22.6, 0, -32, 22.6, -22.6, 32, 0, 22.6, 22.6, 0, 32, -22.6, 22.6, -32, 0)
+width = 2.0
+default_color = Color(0.35, 0.5, 0.2, 1)
+
+[node name="EyeLeft" type="Polygon2D" parent="."]
+position = Vector2(-7, -5)
+color = Color(0.6, 0.7, 0.2, 1)
+polygon = PackedVector2Array(-4, 0, -2.8, -2.8, 0, -4, 2.8, -2.8, 4, 0, 2.8, 2.8, 0, 4, -2.8, 2.8)
+
+[node name="EyeRight" type="Polygon2D" parent="."]
+position = Vector2(7, -5)
+color = Color(0.6, 0.7, 0.2, 1)
+polygon = PackedVector2Array(-4, 0, -2.8, -2.8, 0, -4, 2.8, -2.8, 4, 0, 2.8, 2.8, 0, 4, -2.8, 2.8)
+
+[node name="XPupil1" type="Line2D" parent="."]
+points = PackedVector2Array(5, -7, 9, -3)
+width = 1.5
+default_color = Color(0.2, 0.3, 0.1, 1)
+
+[node name="XPupil2" type="Line2D" parent="."]
+points = PackedVector2Array(9, -7, 5, -3)
+width = 1.5
+default_color = Color(0.2, 0.3, 0.1, 1)
+
+[node name="Drool1" type="Line2D" parent="."]
+points = PackedVector2Array(-4, 6, -6, 14)
+width = 2.0
+default_color = Color(0.3, 0.5, 0.15, 0.5)
+
+[node name="Drool2" type="Line2D" parent="."]
+points = PackedVector2Array(3, 7, 5, 13)
+width = 2.0
+default_color = Color(0.3, 0.5, 0.15, 0.5)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -20.0
+offset_top = 38.0
+offset_right = 20.0
+offset_bottom = 54.0
+mouse_filter = 2
+text = "ZOMBIE"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.3, 0.5, 0.15, 0.7)
 
 [node name="InputArea" type="Area2D" parent="."]
 input_pickable = true

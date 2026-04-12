@@ -7,9 +7,9 @@ var faction_id: int = 0
 var selected_villagers: Array = []
 var _selected_resource: Node = null
 var _selected_resource_type: String = ""
-var selected_building: Node = null  ## Currently selected building (home or church)
-var selected_door: Node = null      ## Currently selected door for reverse break-door assignment
-var pending_combat_mode: String = ""  ## "attack" or "stun", set by HUD combat buttons
+var selected_building: Node = null
+var selected_door: Node = null
+var pending_combat_mode: String = ""
 
 
 func _get_selected_net_ids() -> Array:
@@ -51,7 +51,8 @@ func has_selection() -> bool:
 func select_building(b: Node) -> void:
 	deselect_all()
 	selected_building = b
-	b.is_selected = true
+	if is_instance_valid(b):
+		b.is_selected = true
 
 
 func deselect_building() -> void:
@@ -68,7 +69,6 @@ func has_building_selection() -> bool:
 
 
 func select_door(door: Node) -> void:
-	## Select a closed door for reverse break-door assignment.
 	deselect_door()
 	deselect_all()
 	selected_door = door
@@ -147,82 +147,119 @@ func command_release() -> void:
 	EventFeed.push("Commands cleared.", Color(0.7, 0.7, 0.7))
 
 
+func _release_selected_from_housing(buildings: Array) -> bool:
+	var released_any := false
+
+	for building in buildings:
+		if building == null or not is_instance_valid(building):
+			continue
+		if not building.has_method("release_villager"):
+			continue
+		if not ("sheltered" in building):
+			continue
+
+		var to_release: Array = []
+		for v in building.sheltered:
+			if is_instance_valid(v) and v in selected_villagers:
+				to_release.append(v)
+
+		for v in to_release:
+			building.release_villager(v)
+			released_any = true
+
+	return released_any
+
+
 func command_enter_exit_house(homes: Array, churches: Array) -> void:
+	## Legacy helper: release selected villagers if already sheltered.
+	## Otherwise place them into the nearest valid home/church.
 	if selected_villagers.is_empty():
 		return
 	if FactionManager.is_eliminated(faction_id):
 		return
+
+	var all_housing: Array = homes + churches
+
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
 			"type": "enter_exit_house",
 			"net_ids": _get_selected_net_ids(),
 		})
-	else:
-		# Local path — apply directly (same logic as main._apply_house_command)
-		var released_any := false
-		for building in homes + churches:
-			var to_release: Array = []
-			for v in building.sheltered:
-				if is_instance_valid(v) and v in selected_villagers:
-					to_release.append(v)
-			for v in to_release:
-				building.sheltered.erase(v)
-				v.visible = true
-				v.set_process(true)
-				v.global_position = building.global_position + Vector2(randf_range(-60, 60), randf_range(40, 80))
-				released_any = true
-		if released_any:
-			EventFeed.push("Villagers exited building.", Color(0.7, 0.6, 0.4))
-			return
-		var sheltered_count := 0
-		for v in selected_villagers:
-			if not is_instance_valid(v) or not v.visible:
+		return
+
+	if _release_selected_from_housing(all_housing):
+		EventFeed.push("Villagers exited building.", Color(0.7, 0.6, 0.4))
+		return
+
+	var sheltered_count := 0
+	for v in selected_villagers:
+		if not is_instance_valid(v) or not v.visible:
+			continue
+
+		var best_building: Node = null
+		var best_bd: float = INF
+		for b in all_housing:
+			if b == null or not is_instance_valid(b):
 				continue
-			var best_building: Node = null
-			var best_bd: float = INF
-			for b in homes + churches:
-				if b.is_full():
-					continue
-				var d: float = v.global_position.distance_to(b.global_position)
-				if d < best_bd:
-					best_bd = d
-					best_building = b
-			if best_building:
-				best_building.shelter_villager(v)
-				sheltered_count += 1
-		if sheltered_count > 0:
-			EventFeed.push("%d villager(s) entered building." % sheltered_count, Color(0.7, 0.6, 0.4))
+			if not b.has_method("try_house_villager"):
+				continue
+			if b.has_method("can_house_villager") and not b.can_house_villager(v):
+				continue
+
+			var d: float = v.global_position.distance_to(b.global_position)
+			if d < best_bd:
+				best_bd = d
+				best_building = b
+
+		if best_building and best_building.try_house_villager(v):
+			sheltered_count += 1
+
+	if sheltered_count > 0:
+		EventFeed.push("%d villager(s) entered building." % sheltered_count, Color(0.7, 0.6, 0.4))
 
 
-func command_house_in_target_building(building: Node, room_owner: int) -> bool:
-	## House selected villagers in a specific clicked building.
-	## Returns false if building doesn't support housing or room isn't owned by this faction.
-	if selected_villagers.is_empty() or FactionManager.is_eliminated(faction_id):
+func command_house_in_target_building(target_building: Node, room_owner_fid: int) -> bool:
+	## New targeted housing flow for HUD pending command:
+	## click House -> click Home/Church.
+	if selected_villagers.is_empty():
 		return false
-	if not building.has_method("can_house_villager"):
+	if FactionManager.is_eliminated(faction_id):
 		return false
-	if room_owner != faction_id and FactionManager.get_all_faction_ids().size() > 1:
+	if target_building == null or not is_instance_valid(target_building):
 		return false
+
+	if not target_building.has_method("supports_housing") or not target_building.supports_housing():
+		return false
+	if not target_building.has_method("belongs_to_faction") or not target_building.belongs_to_faction(faction_id):
+		return false
+	if room_owner_fid != faction_id:
+		return false
+
+	if target_building.has_method("is_full") and target_building.is_full():
+		EventFeed.push("That building is full.", Color(0.9, 0.6, 0.3))
+		return false
+
 	if NetworkManager.is_online() and not NetworkManager.is_authority():
 		NetworkManager.send_command({
 			"type": "house_target",
 			"net_ids": _get_selected_net_ids(),
-			"bx": building.global_position.x,
-			"by": building.global_position.y,
+			"target_net_id": target_building.net_id if "net_id" in target_building else -1,
 		})
-	else:
-		var housed_any := false
-		for v in selected_villagers:
-			if not is_instance_valid(v) or not v.visible:
-				continue
-			if not building.can_house_villager(v):
-				continue
-			building.try_house_villager(v)
-			TutorialManager.on_shelter()
-			housed_any = true
-		if housed_any:
-			EventFeed.push("Villager(s) housed.", Color(0.7, 0.6, 0.4))
-	return true
+		return true
+
+	var sheltered_count := 0
+	for v in selected_villagers:
+		if not is_instance_valid(v) or not v.visible:
+			continue
+		if target_building.has_method("try_house_villager") and target_building.try_house_villager(v):
+			sheltered_count += 1
+
+	if sheltered_count > 0:
+		EventFeed.push("%d villager(s) entered building." % sheltered_count, Color(0.7, 0.6, 0.4))
+		return true
+
+	EventFeed.push("No selected villagers could enter that building.", Color(0.8, 0.5, 0.4))
+	return false
 
 
 func try_click_villager(click_pos: Vector2, villagers: Array, shift_held: bool) -> bool:
@@ -279,7 +316,6 @@ func has_resource_selection() -> bool:
 
 
 func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Callable) -> bool:
-	## Try to select a building. Any building owned by local faction is selectable.
 	if FactionManager.is_eliminated(faction_id):
 		return false
 	var best_b: Node = null
@@ -298,7 +334,6 @@ func try_click_building(click_pos: Vector2, buildings: Array, _room_id_at: Calla
 
 
 func command_break_door(target_pos: Vector2, door_node: Node = null) -> void:
-	## Send break-door command for selected red villagers.
 	if selected_villagers.is_empty():
 		return
 	if FactionManager.is_eliminated(faction_id):
@@ -329,7 +364,6 @@ func command_break_door(target_pos: Vector2, door_node: Node = null) -> void:
 
 
 func command_attack_target(target: Node) -> void:
-	## Send attack command to all selected red villagers.
 	if selected_villagers.is_empty() or FactionManager.is_eliminated(faction_id):
 		return
 	var red_ids: Array = []
@@ -353,7 +387,6 @@ func command_attack_target(target: Node) -> void:
 
 
 func command_stun_target(target: Node) -> void:
-	## Send stun command to all selected blue villagers.
 	if selected_villagers.is_empty() or FactionManager.is_eliminated(faction_id):
 		return
 	var blue_ids: Array = []

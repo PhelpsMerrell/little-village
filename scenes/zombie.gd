@@ -4,10 +4,10 @@ extends Node2D
 ## Slow but relentless. Killed by any red. Despawns at dawn.
 
 const RADIUS := 32.0
-const SPEED := 25.0             # slow shamble
+const SPEED := 25.0
 const HEALTH := 30.0
 const PURSUIT_RANGE := 400.0
-const CONVERT_COOLDOWN := 2.0   # seconds between conversion attempts
+const CONVERT_COOLDOWN := 2.0
 
 var current_room_id: int = -1
 var room_bounds: Rect2 = Rect2()
@@ -15,7 +15,6 @@ var is_dead: bool = false
 var health: float = HEALTH
 var max_health: float = HEALTH
 
-# Required interface for main.gd
 var level: int = 1
 var net_id: int = -1
 var is_puppet: bool = false
@@ -26,13 +25,16 @@ var enemy_type: String = "zombie"
 
 var _convert_cooldowns: Dictionary = {}
 var _state_timer: float = 0.0
+var _stun_timer: float = 0.0
 
-# Brain context
 var brain_villagers: Array = []
 
 
 func is_stunned() -> bool:
-	return false
+	return _stun_timer > 0.0
+
+func apply_stun(duration: float) -> void:
+	_stun_timer = maxf(_stun_timer, duration)
 
 
 func _process(delta: float) -> void:
@@ -40,7 +42,6 @@ func _process(delta: float) -> void:
 	if is_puppet:
 		if interp_target != Vector2.ZERO:
 			global_position = global_position.lerp(interp_target, clampf(delta * 14.0, 0.0, 1.0))
-		queue_redraw()
 		return
 	var expired: Array = []
 	for key in _convert_cooldowns:
@@ -49,8 +50,11 @@ func _process(delta: float) -> void:
 	for key in expired:
 		_convert_cooldowns.erase(key)
 
+	# Stun tick
+	if _stun_timer > 0.0:
+		_stun_timer -= delta
+		return
 	_pursue_villager(delta)
-	queue_redraw()
 
 
 func _pursue_villager(delta: float) -> void:
@@ -76,18 +80,14 @@ func _pursue_villager(delta: float) -> void:
 					global_position += to_t.normalized() * SPEED * 0.3 * delta
 
 
-## Zombie touch: converts villager. Returns "convert" if successful.
-## Main.gd handles the actual conversion (remove villager, spawn zombie).
 func try_attack(villager: Node) -> String:
 	if _convert_cooldowns.has(villager): return "immune"
 	var color: String = str(villager.color_type)
-	# Reds fight back — immune to conversion
 	if color == "red": return "immune"
 	_convert_cooldowns[villager] = CONVERT_COOLDOWN
 	return "convert"
 
 
-## Any red kills a zombie.
 func take_red_hit(red_level: int) -> bool:
 	var dmg: float = 30.0 + float(red_level) * 10.0
 	health -= dmg
@@ -96,28 +96,3 @@ func take_red_hit(red_level: int) -> bool:
 
 func die() -> void:
 	is_dead = true; queue_free()
-
-
-func _draw() -> void:
-	# Sickly green body
-	var body_col := Color(0.2, 0.4, 0.15)
-	var outline_col := Color(0.35, 0.5, 0.2)
-
-	# Irregular circle
-	draw_circle(Vector2.ZERO, RADIUS, body_col)
-	draw_arc(Vector2.ZERO, RADIUS, 0.0, TAU, 32, outline_col, 2.0, true)
-
-	# Dead eyes
-	draw_circle(Vector2(-7, -5), 4.0, Color(0.6, 0.7, 0.2))
-	draw_circle(Vector2(7, -5), 4.0, Color(0.6, 0.7, 0.2))
-	# X pupil on one eye
-	draw_line(Vector2(5, -7), Vector2(9, -3), Color(0.2, 0.3, 0.1), 1.5)
-	draw_line(Vector2(9, -7), Vector2(5, -3), Color(0.2, 0.3, 0.1), 1.5)
-
-	# Drool / decay marks
-	draw_line(Vector2(-4, 6), Vector2(-6, 14), Color(0.3, 0.5, 0.15, 0.5), 2.0)
-	draw_line(Vector2(3, 7), Vector2(5, 13), Color(0.3, 0.5, 0.15, 0.5), 2.0)
-
-	# Label
-	draw_string(ThemeDB.fallback_font, Vector2(-20, RADIUS + 16), "ZOMBIE",
-		HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.3, 0.5, 0.15, 0.7))

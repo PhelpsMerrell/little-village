@@ -1,19 +1,35 @@
 extends Node2D
-## Stone on the ground. Only yellows pick it up — sets carrying_stone = true.
-## Stone is NOT credited to economy until deposited at a bank.
+## Resource on the ground. Only yellows pick it up.
+## Supports "stone" and "diamond" types.
 
 const RADIUS := 12.0
 var collected: bool = false
 
 @export var resource_type: String = "stone"
 
+@onready var _stone_body: Polygon2D = $StoneBody
+@onready var _stone_highlight: Polygon2D = $StoneHighlight
+@onready var _diamond_body: Polygon2D = $DiamondBody
+@onready var _diamond_outline: Line2D = $DiamondOutline
+@onready var _diamond_highlight: Polygon2D = $DiamondHighlight
 
-func _draw() -> void:
-	if collected:
-		return
-	draw_circle(Vector2.ZERO, RADIUS, Color(0.5, 0.52, 0.48))
-	draw_arc(Vector2.ZERO, RADIUS, 0.0, TAU, 24, Color(0.35, 0.35, 0.35), 1.5, true)
-	draw_circle(Vector2(-3, -4), 3.0, Color(0.7, 0.72, 0.68, 0.6))
+
+func _ready() -> void:
+	_update_visual()
+
+
+func _update_visual() -> void:
+	var is_diamond: bool = (resource_type == "diamond")
+	if _stone_body:
+		_stone_body.visible = not is_diamond
+	if _stone_highlight:
+		_stone_highlight.visible = not is_diamond
+	if _diamond_body:
+		_diamond_body.visible = is_diamond
+	if _diamond_outline:
+		_diamond_outline.visible = is_diamond
+	if _diamond_highlight:
+		_diamond_highlight.visible = is_diamond
 
 
 func try_collect(villager: Node) -> bool:
@@ -21,13 +37,13 @@ func try_collect(villager: Node) -> bool:
 		return false
 	if str(villager.color_type) != "yellow":
 		return false
-	if villager.carrying_stone:
-		return false   # already carrying one
+	if villager.is_carrying():
+		return false
 	var dist: float = villager.global_position.distance_to(global_position)
 	if dist < float(villager.radius) + RADIUS + 4.0:
 		collected = true
-		villager.carrying_stone = true
-		queue_redraw()
+		villager.carrying_resource = resource_type
+		visible = false
 		var tw := create_tween()
 		tw.tween_property(self, "modulate:a", 0.0, 0.3)
 		tw.tween_callback(queue_free)

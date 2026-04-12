@@ -12,14 +12,14 @@ const PAUSE_MAX := 2.5
 
 const BLUE_DAMAGE := 40.0
 const HIT_COOLDOWN := 1.0
-const STUN_DURATION := 2.5       # seconds stunned after hitting blue
+const STUN_DURATION := 2.5
 
 const HEALTH_BY_LEVEL := {1: 50.0, 2: 50.0, 3: 150.0}
 const RED_DAMAGE := {1: 50.0, 2: 75.0, 3: 150.0}
 
 var level: int = 1
-var net_id: int = -1  ## Unique ID for network state sync
-var is_puppet: bool = false  ## Client-side puppet: interpolates, no brain
+var net_id: int = -1
+var is_puppet: bool = false
 var interp_target: Vector2 = Vector2.ZERO
 var radius: float = BASE_RADIUS
 var health: float = 50.0
@@ -41,6 +41,15 @@ var _drag_offset := Vector2.ZERO
 
 @onready var _area: Area2D = $InputArea
 @onready var _col_shape: CollisionShape2D = $InputArea/CollisionShape2D
+@onready var _l1_body: Polygon2D = $L1Body
+@onready var _l1_outline: Line2D = $L1Outline
+@onready var _l2_body: Polygon2D = $L2Body
+@onready var _l2_outline: Line2D = $L2Outline
+@onready var _l3_body: Polygon2D = $L3Body
+@onready var _l3_outline: Line2D = $L3Outline
+@onready var _eye_left: Polygon2D = $EyeLeft
+@onready var _eye_right: Polygon2D = $EyeRight
+@onready var _level_label: Label = $LevelLabel
 
 
 func _ready() -> void:
@@ -65,10 +74,46 @@ func _sync_level() -> void:
 		var shape := CircleShape2D.new()
 		shape.radius = radius
 		_col_shape.shape = shape
+	_update_level_visuals()
+
+
+func _update_level_visuals() -> void:
+	if not _l1_body:
+		return
+	_l1_body.visible = (level == 1)
+	_l1_outline.visible = (level == 1)
+	_l2_body.visible = (level == 2)
+	_l2_outline.visible = (level == 2)
+	_l3_body.visible = (level == 3)
+	_l3_outline.visible = (level == 3)
+
+	# Scale bodies for level
+	var s: float = radius / BASE_RADIUS
+	_l1_body.scale = Vector2(s, s)
+	_l1_outline.scale = Vector2(s, s)
+	_l2_body.scale = Vector2(s, s)
+	_l2_outline.scale = Vector2(s, s)
+	_l3_body.scale = Vector2(s, s)
+	_l3_outline.scale = Vector2(s, s)
+
+	# Scale eyes
+	_eye_left.scale = Vector2(s, s)
+	_eye_left.position = Vector2(-8 * s, -6 * s)
+	_eye_right.scale = Vector2(s, s)
+	_eye_right.position = Vector2(8 * s, -6 * s)
+
+	# Level label
+	_level_label.visible = (level > 1)
+	if level > 1:
+		_level_label.text = "L%d" % level
 
 
 func is_stunned() -> bool:
 	return _state == State.STUNNED
+
+func apply_stun(duration: float) -> void:
+	_state = State.STUNNED
+	_stun_timer = maxf(_stun_timer, duration)
 
 
 func _process(delta: float) -> void:
@@ -86,6 +131,14 @@ func _process(delta: float) -> void:
 			expired.append(key)
 	for key in expired:
 		_hit_cooldowns.erase(key)
+
+	# Stun visual on eyes
+	if _state == State.STUNNED:
+		_eye_left.color = Color(0.9, 0.8, 0.2)
+		_eye_right.color = Color(0.9, 0.8, 0.2)
+	else:
+		_eye_left.color = Color(0.8, 0.15, 0.1)
+		_eye_right.color = Color(0.8, 0.15, 0.1)
 
 	if not _dragging:
 		match _state:
@@ -139,8 +192,6 @@ func _pick_wander_target() -> bool:
 	return true
 
 
-# ── input ────────────────────────────────────────────────────────────────────
-
 func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		_dragging = true
@@ -159,7 +210,6 @@ func _input(event: InputEvent) -> void:
 		global_position = get_global_mouse_position() + _drag_offset
 
 
-## Enemy attacks a villager. Called by main.gd.
 func try_attack(villager: Node) -> String:
 	if is_stunned():
 		return "immune"
@@ -174,7 +224,6 @@ func try_attack(villager: Node) -> String:
 	elif color == "blue":
 		_hit_cooldowns[villager] = HIT_COOLDOWN
 		villager.health -= BLUE_DAMAGE
-		# Stun self after hitting blue
 		_state = State.STUNNED
 		_stun_timer = STUN_DURATION
 		if villager.health <= 0.0:
@@ -183,7 +232,6 @@ func try_attack(villager: Node) -> String:
 	return "immune"
 
 
-## Red villager hits this enemy. Returns true if dead.
 func take_red_hit(red_level: int) -> bool:
 	var dmg: float = RED_DAMAGE.get(red_level, 50.0)
 	health -= dmg
@@ -195,60 +243,12 @@ func die() -> void:
 	queue_free()
 
 
-# ── drawing ──────────────────────────────────────────────────────────────────
-
 func _draw() -> void:
-	var body_color := Color(0.1, 0.1, 0.1)
-	var outline_color := Color(0.4, 0.08, 0.08)
-
-	# Stunned visual — lighter, dizzy
+	# Dynamic overlays only: stun stars, health bar, dupe meter
 	if _state == State.STUNNED:
-		body_color = Color(0.25, 0.2, 0.2)
-		outline_color = Color(0.5, 0.4, 0.1)
-
-	match level:
-		1:
-			draw_circle(Vector2.ZERO, radius, body_color)
-			draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, outline_color, 2.5, true)
-		2:
-			var r := radius * 0.85
-			draw_rect(Rect2(-r, -r, r * 2, r * 2), body_color)
-			draw_rect(Rect2(-r, -r, r * 2, r * 2), outline_color, false, 2.5)
-		3:
-			var r := radius
-			var pts := PackedVector2Array([
-				Vector2(0, -r),
-				Vector2(r * 0.866, r * 0.5),
-				Vector2(-r * 0.866, r * 0.5),
-			])
-			draw_colored_polygon(pts, body_color)
-			draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]),
-				outline_color, 2.5)
-
-	# Eyes
-	var es := radius / BASE_RADIUS
-	if _state == State.STUNNED:
-		# Dizzy X eyes
-		var ex1 := Vector2(-8 * es, -6 * es)
-		var ex2 := Vector2(8 * es, -6 * es)
-		var xs := 3.0 * es
-		draw_line(ex1 + Vector2(-xs, -xs), ex1 + Vector2(xs, xs), Color(0.9, 0.8, 0.2), 2.0)
-		draw_line(ex1 + Vector2(xs, -xs), ex1 + Vector2(-xs, xs), Color(0.9, 0.8, 0.2), 2.0)
-		draw_line(ex2 + Vector2(-xs, -xs), ex2 + Vector2(xs, xs), Color(0.9, 0.8, 0.2), 2.0)
-		draw_line(ex2 + Vector2(xs, -xs), ex2 + Vector2(-xs, xs), Color(0.9, 0.8, 0.2), 2.0)
-		# Stars above head
 		draw_string(ThemeDB.fallback_font,
 			Vector2(-radius * 0.5, -radius - 8), "***",
 			HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(0.9, 0.8, 0.2, 0.7))
-	else:
-		draw_circle(Vector2(-8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
-		draw_circle(Vector2(8 * es, -6 * es), 4.0 * es, Color(0.8, 0.15, 0.1))
-
-	# Level text
-	if level > 1:
-		draw_string(ThemeDB.fallback_font,
-			Vector2(-radius, radius + 14.0), "L%d" % level,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.2, 0.2, 0.8))
 
 	# Health bar (L3 only)
 	if level == 3:

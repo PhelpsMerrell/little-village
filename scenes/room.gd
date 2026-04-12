@@ -7,12 +7,25 @@ extends Node2D
 @export var room_label: String = ""
 
 @onready var _bg: ColorRect = $Background
+@onready var _border: Line2D = $Border
+@onready var _room_label: Label = $RoomLabel
+@onready var _owner_symbol: Label = $OwnerSymbol
 
 
 func _ready() -> void:
 	_bg.size = room_size
 	_bg.color = room_color
 	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Update border points to match room size
+	_border.points = PackedVector2Array([
+		Vector2.ZERO, Vector2(room_size.x, 0),
+		room_size, Vector2(0, room_size.y), Vector2.ZERO])
+	# Label
+	var lbl := room_label if not room_label.is_empty() else ("Room %d" % room_id)
+	_room_label.text = lbl
+	# Owner symbol position
+	_owner_symbol.offset_left = room_size.x - 40.0
+	_owner_symbol.offset_right = room_size.x - 4.0
 
 
 func get_rect() -> Rect2:
@@ -29,28 +42,28 @@ func get_blocked_rects_for(color_id: String) -> Array:
 
 
 func _process(_delta: float) -> void:
+	_update_ownership_visuals()
 	queue_redraw()
 
 
-func _draw() -> void:
-	var label := room_label if not room_label.is_empty() else ("Room %d" % room_id)
-	draw_string(ThemeDB.fallback_font, Vector2(10, 22), label,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.45, 0.45, 0.45, 0.6))
-
-	# Draw border based on ownership
+func _update_ownership_visuals() -> void:
 	var owner_fid: int = RoomOwnership.get_room_owner(room_id)
 	if owner_fid >= 0:
 		var fc: Color = FactionManager.get_faction_color(owner_fid)
 		fc.a = 0.7
-		draw_rect(Rect2(Vector2.ZERO, room_size), fc, false, 4.0)
-		# Faction symbol in corner
-		var sym: String = FactionManager.get_faction_symbol(owner_fid)
-		draw_string(ThemeDB.fallback_font, Vector2(room_size.x - 30, 22), sym,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, fc)
+		_border.default_color = fc
+		_border.width = 4.0
+		_owner_symbol.text = FactionManager.get_faction_symbol(owner_fid)
+		_owner_symbol.add_theme_color_override("font_color", fc)
+		_owner_symbol.visible = true
 	else:
-		draw_rect(Rect2(Vector2.ZERO, room_size), Color(0.3, 0.3, 0.3, 0.4), false, 2.0)
+		_border.default_color = Color(0.3, 0.3, 0.3, 0.4)
+		_border.width = 2.0
+		_owner_symbol.visible = false
 
-	# Capture progress bar
+
+func _draw() -> void:
+	# Dynamic overlay: capture progress bar only
 	var cap_ratio: float = RoomOwnership.get_capture_progress_ratio(room_id)
 	if cap_ratio > 0.01:
 		var cap_fid: int = RoomOwnership.get_capture_faction(room_id)

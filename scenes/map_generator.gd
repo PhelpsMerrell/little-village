@@ -33,6 +33,7 @@ const RT_COLORLESS_PASSAGE := "colorless_passage"
 const RT_COLORLESS_CAMP    := "colorless_camp"
 const RT_ENEMY_DEN         := "enemy_den"
 const RT_CONTESTED         := "contested"
+const RT_DIAMOND           := "diamond_cave"
 
 # Room type colors
 const ROOM_COLORS := {
@@ -45,6 +46,7 @@ const ROOM_COLORS := {
 	RT_COLORLESS_CAMP:    Color(0.15, 0.14, 0.12, 0.35),
 	RT_ENEMY_DEN:         Color(0.12, 0.08, 0.08, 0.35),
 	RT_CONTESTED:         Color(0.10, 0.16, 0.20, 0.35),
+	RT_DIAMOND:           Color(0.12, 0.18, 0.22, 0.35),
 }
 
 # Room type labels
@@ -58,6 +60,7 @@ const ROOM_LABELS := {
 	RT_COLORLESS_CAMP:    "Wanderer Camp",
 	RT_ENEMY_DEN:         "Enemy Den",
 	RT_CONTESTED:         "Contested",
+	RT_DIAMOND:           "Diamond Cave",
 }
 
 # Cluster direction: which way does the chain extend from faction spawn
@@ -281,6 +284,187 @@ func generate_tutorial(containers: Dictionary, scenes: Dictionary) -> void:
 	print("=============================")
 
 
+## Generate a 2-room sandbox map for free play.
+## Room A: big open room with villagers, orb in safe corner.
+## Room B: obstacle-filled room with enemies.
+func generate_sandbox(containers: Dictionary, scenes: Dictionary) -> void:
+	_rng = RandomNumberGenerator.new()
+	_rng.seed = 99
+	_faction_count = 1
+	_faction_id_map = [0]
+	_grid_cols = 5
+	_grid_rows = 3
+	_map_size_index = 0
+	_init_grid()
+	_next_room_id = 0
+	FACTION_STARTS.clear()
+	_door_restrictions.clear()
+	_river_room_ids.clear()
+
+	# Room A: Big open playground (3x2)
+	var room_a_id: int = _next_room_id
+	_next_room_id += 1
+	_mark_grid(Vector2i(0, 0), 3, 2, room_a_id)
+	_mark_island_mask(Vector2i(0, 0), 3, 2)
+	_room_defs_map[room_a_id] = {
+		"id": room_a_id, "col": 0, "row": 0,
+		"cw": 3, "ch": 2, "label": "Sandbox",
+		"color": Color(0.14, 0.14, 0.18, 0.35), "type": RT_CORE, "faction": 0,
+	}
+
+	# Room B: Enemy arena with obstacles (2x2)
+	var room_b_id: int = _next_room_id
+	_next_room_id += 1
+	_mark_grid(Vector2i(3, 0), 2, 2, room_b_id)
+	_mark_island_mask(Vector2i(3, 0), 2, 2)
+	_room_defs_map[room_b_id] = {
+		"id": room_b_id, "col": 3, "row": 0,
+		"cw": 2, "ch": 2, "label": "Enemy Arena",
+		"color": Color(0.18, 0.1, 0.1, 0.35), "type": RT_ENEMY_DEN, "faction": -1,
+	}
+
+	FACTION_STARTS.append({
+		"home_room": room_a_id,
+		"bank_room": room_a_id,
+		"river_room": -1,
+	})
+
+	_build_room_defs_array()
+	_generate_rooms(containers["rooms"], scenes["room"])
+
+	# ── Wall with door between A and B ──
+	var wall_scene: PackedScene = scenes["wall"]
+	var wall_x: float = 3.0 * (CELL + MAP_GAP) - MAP_GAP / 2.0
+	var wall_start := Vector2(wall_x, 0.0)
+	var wall_end := Vector2(wall_x, 2.0 * (CELL + MAP_GAP) - MAP_GAP)
+	var mid_y: float = (wall_start.y + wall_end.y) * 0.5
+	var half_door: float = DOOR_SIZE * 0.5
+	var door_start := Vector2(wall_x, mid_y - half_door)
+	var door_end := Vector2(wall_x, mid_y + half_door)
+
+	if wall_start.distance_to(door_start) > 20.0:
+		var w1 = wall_scene.instantiate()
+		w1.room_a_id = room_a_id; w1.room_b_id = room_b_id
+		w1.start_pos = wall_start; w1.end_pos = door_start
+		containers["walls"].add_child(w1)
+
+	var door = wall_scene.instantiate()
+	door.room_a_id = room_a_id; door.room_b_id = room_b_id
+	door.start_pos = door_start; door.end_pos = door_end
+	door.is_door = true; door.is_open = false
+	containers["walls"].add_child(door)
+
+	if door_end.distance_to(wall_end) > 20.0:
+		var w2 = wall_scene.instantiate()
+		w2.room_a_id = room_a_id; w2.room_b_id = room_b_id
+		w2.start_pos = door_end; w2.end_pos = wall_end
+		containers["walls"].add_child(w2)
+
+	# ── Room A entities ──
+	var a_pos: Vector2 = room_pixel_pos(0, 0)
+	var a_size: Vector2 = room_pixel_size(3, 2)
+
+	# Magic orb — safe top-left corner
+	var orb = scenes["villager"].instantiate()
+	containers["villagers"].add_child(orb)
+	orb.setup("magic_orb", Vector2(a_pos.x + 120, a_pos.y + 120))
+	orb.faction_id = 0
+
+	# Red villager — top-right area
+	var rv = scenes["villager"].instantiate()
+	containers["villagers"].add_child(rv)
+	rv.setup("red", Vector2(a_pos.x + a_size.x - 200, a_pos.y + 200))
+	rv.faction_id = 0
+	rv._satiation_timer = rv.SATIATION_PER_LEVEL[1]
+	rv.is_fed = true
+
+	# Yellow villagers — center-left and center-right
+	for i in 2:
+		var yv = scenes["villager"].instantiate()
+		containers["villagers"].add_child(yv)
+		yv.setup("yellow", Vector2(a_pos.x + 300 + i * 500, a_pos.y + a_size.y * 0.5))
+		yv.faction_id = 0
+
+	# Blue villagers — bottom-left and bottom-right
+	for i in 2:
+		var bv = scenes["villager"].instantiate()
+		containers["villagers"].add_child(bv)
+		bv.setup("blue", Vector2(a_pos.x + 250 + i * 600, a_pos.y + a_size.y - 250))
+		bv.faction_id = 0
+
+	# Bank + fishing hut + home for resource play
+	var bank = scenes["bank"].instantiate()
+	containers["banks"].add_child(bank)
+	bank.global_position = Vector2(a_pos.x + a_size.x * 0.5, a_pos.y + a_size.y - 150)
+	bank.placed_by_faction = -2
+
+	var hut = scenes["hut"].instantiate()
+	containers["huts"].add_child(hut)
+	hut.global_position = Vector2(a_pos.x + 200, a_pos.y + a_size.y - 150)
+	hut.placed_by_faction = -2
+
+	var home = preload("res://scenes/home.tscn").instantiate()
+	containers["homes"].add_child(home)
+	home.global_position = Vector2(a_pos.x + a_size.x - 200, a_pos.y + a_size.y - 150)
+	home.placed_by_faction = -2
+
+	# Some stone and fish in Room A
+	for i in 8:
+		var c = scenes["collectable"].instantiate()
+		containers["collectables"].add_child(c)
+		c.global_position = _rand_in_room(a_pos, a_size, 100.0)
+	for i in 5:
+		var f = scenes["fish"].instantiate()
+		containers["fish"].add_child(f)
+		f.global_position = _rand_in_room(a_pos, a_size, 100.0)
+
+	# ── Room B entities — enemies + internal walls ──
+	var b_pos: Vector2 = room_pixel_pos(3, 0)
+	var b_size: Vector2 = room_pixel_size(2, 2)
+	var b_center: Vector2 = b_pos + b_size * 0.5
+
+	# Internal obstacle walls (breakable) — create maze-like layout
+	var obs_scene: PackedScene = preload("res://scenes/obstacles/breakable_wall_obstacle.tscn")
+	var room_b_node = room_map.get(room_b_id)
+	if room_b_node:
+		# Horizontal wall across top third
+		var obs1 = obs_scene.instantiate()
+		obs1.wall_size = Vector2(b_size.x * 0.6, 14)
+		room_b_node.add_child(obs1)
+		obs1.position = Vector2(50, b_size.y * 0.3)
+
+		# Horizontal wall across bottom third (offset from right)
+		var obs2 = obs_scene.instantiate()
+		obs2.wall_size = Vector2(b_size.x * 0.6, 14)
+		room_b_node.add_child(obs2)
+		obs2.position = Vector2(b_size.x * 0.4 - 50, b_size.y * 0.65)
+
+		# Short vertical wall in center
+		var obs3 = obs_scene.instantiate()
+		obs3.wall_size = Vector2(14, b_size.y * 0.25)
+		room_b_node.add_child(obs3)
+		obs3.position = Vector2(b_size.x * 0.5, b_size.y * 0.35)
+
+	# 5 enemies scattered in Room B
+	for i in 5:
+		var e = scenes["enemy"].instantiate()
+		containers["enemies"].add_child(e)
+		e.global_position = Vector2(
+			_rng.randf_range(b_pos.x + 150, b_pos.x + b_size.x - 150),
+			_rng.randf_range(b_pos.y + 150, b_pos.y + b_size.y - 150))
+
+	# Extra stone in Room B
+	for i in 6:
+		var c = scenes["collectable"].instantiate()
+		containers["collectables"].add_child(c)
+		c.global_position = _rand_in_room(b_pos, b_size, 100.0)
+
+	print("=== SANDBOX MAP GENERATED ===")
+	print("Room A (id=%d): %s size=%s" % [room_a_id, str(a_pos), str(a_size)])
+	print("Room B (id=%d): %s size=%s" % [room_b_id, str(b_pos), str(b_size)])
+	print("=============================")
+
+
 func generate(containers: Dictionary, scenes: Dictionary, map_seed: int = -1,
 		faction_count: int = 1, map_size: String = "medium",
 		faction_id_map: Array = []) -> void:
@@ -304,7 +488,8 @@ func generate(containers: Dictionary, scenes: Dictionary, map_seed: int = -1,
 	_fill_neutral_rooms()
 	_build_room_defs_array()
 	_generate_rooms(containers["rooms"], scenes["room"])
-	_generate_walls(containers["walls"], scenes["wall"])
+	# Walls/doors omitted in main game — open map layout.
+	# Tutorial and sandbox modes generate walls in their own methods.
 	_generate_entities(containers, scenes)
 	_generate_faction_starts(containers, scenes)
 	_print_debug_summary()
@@ -828,9 +1013,11 @@ func _assign_room_types() -> void:
 	var target_rivers: int = maxi(1, total_neutral / 6)
 	var target_quarries: int = maxi(1, total_neutral / 4)
 	var target_enemies: int = maxi(1, total_neutral / 8)
+	var target_diamonds: int = maxi(1, total_neutral / 10)
 	var rivers_placed: int = 0
 	var quarries_placed: int = 0
 	var enemies_placed: int = 0
+	var diamonds_placed: int = 0
 
 	# Sort by distance
 	neutral_rooms.sort_custom(func(a, b): return dist_map[a] < dist_map[b])
@@ -842,12 +1029,14 @@ func _assign_room_types() -> void:
 			d, rd["cw"], rd["ch"],
 			rivers_placed, target_rivers,
 			quarries_placed, target_quarries,
-			enemies_placed, target_enemies)
+			enemies_placed, target_enemies,
+			diamonds_placed, target_diamonds)
 
 		match room_type:
 			RT_RIVER:     rivers_placed += 1
 			RT_QUARRY:    quarries_placed += 1
 			RT_ENEMY_DEN: enemies_placed += 1
+			RT_DIAMOND:   diamonds_placed += 1
 
 		rd["type"] = room_type
 		rd["label"] = ROOM_LABELS.get(room_type, "Room")
@@ -860,7 +1049,8 @@ func _assign_room_types() -> void:
 func _choose_room_type(dist: int, cw: int, ch: int,
 		rivers_placed: int, target_rivers: int,
 		quarries_placed: int, target_quarries: int,
-		enemies_placed: int, target_enemies: int) -> String:
+		enemies_placed: int, target_enemies: int,
+		diamonds_placed: int = 0, target_diamonds: int = 1) -> String:
 
 	var area: int = cw * ch
 
@@ -879,9 +1069,11 @@ func _choose_room_type(dist: int, cw: int, ch: int,
 
 	# Far zone
 	var roll: float = _rng.randf()
-	if rivers_placed < target_rivers and roll < 0.15:
+	if diamonds_placed < target_diamonds and roll < 0.12:
+		return RT_DIAMOND
+	if rivers_placed < target_rivers and roll < 0.25:
 		return RT_RIVER
-	if enemies_placed < target_enemies and roll < 0.3:
+	if enemies_placed < target_enemies and roll < 0.4:
 		return RT_ENEMY_DEN
 	if quarries_placed < target_quarries and roll < 0.45:
 		return RT_QUARRY
@@ -1085,6 +1277,15 @@ func _generate_entities(containers: Dictionary, scenes: Dictionary) -> void:
 				for i in _rng.randi_range(4, 8):
 					_spawn_stone(containers, scenes, rpos, rsize)
 
+			RT_DIAMOND:
+				# Diamond cave: guarded by enemies, contains diamonds
+				for i in _rng.randi_range(1, 3):
+					var e = scenes["enemy"].instantiate()
+					containers["enemies"].add_child(e)
+					e.global_position = _rand_in_room(rpos, rsize, 100.0)
+				for i in _rng.randi_range(4, 8):
+					_spawn_diamond(containers, scenes, rpos, rsize)
+
 			RT_STONE:
 				var bank = scenes["bank"].instantiate()
 				containers["banks"].add_child(bank)
@@ -1104,6 +1305,13 @@ func _spawn_fish(containers: Dictionary, scenes: Dictionary, rpos: Vector2, rsiz
 	var f = scenes["fish"].instantiate()
 	containers["fish"].add_child(f)
 	f.global_position = _rand_in_room(rpos, rsize, 60.0)
+
+
+func _spawn_diamond(containers: Dictionary, scenes: Dictionary, rpos: Vector2, rsize: Vector2) -> void:
+	var c = scenes["collectable"].instantiate()
+	containers["collectables"].add_child(c)
+	c.resource_type = "diamond"
+	c.global_position = _rand_in_room(rpos, rsize, 60.0)
 
 
 func _spawn_colorless(containers: Dictionary, scenes: Dictionary, center: Vector2) -> void:
@@ -1138,6 +1346,7 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 		var margin: float = 150.0
 
 		var color_defs: Array
+		var orb_pos: Vector2 = hcenter
 		if is_survival:
 			# Survival: 5 villagers (2R, 2Y, 1B), no orb
 			color_defs = [
@@ -1148,11 +1357,26 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 				{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
 			]
 		else:
-			# Standard: 3 villagers + orb
+			# Standard: 3 villagers + orb — red closest to door, orb furthest
+			var spawn_dir: ClusterDir = _cluster_direction(_faction_spawn_cells[fi])
+			var door_edge: Vector2
+			match spawn_dir:
+				ClusterDir.RIGHT: door_edge = Vector2(hpos.x + hsize.x, hpos.y + hsize.y * 0.5)
+				ClusterDir.LEFT:  door_edge = Vector2(hpos.x, hpos.y + hsize.y * 0.5)
+				ClusterDir.DOWN:  door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y + hsize.y)
+				_:                door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y)
+			var corners := [
+				Vector2(hpos.x + margin, hpos.y + margin),
+				Vector2(hpos.x + hsize.x - margin, hpos.y + margin),
+				Vector2(hpos.x + margin, hpos.y + hsize.y - margin),
+				Vector2(hpos.x + hsize.x - margin, hpos.y + hsize.y - margin),
+			]
+			corners.sort_custom(func(a, b): return a.distance_to(door_edge) < b.distance_to(door_edge))
+			orb_pos = corners[3]
 			color_defs = [
-				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
-				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
-				{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
+				{"color": "red",    "fed": true,  "pos": corners[0]},
+				{"color": "yellow", "fed": false, "pos": corners[1]},
+				{"color": "blue",   "fed": false, "pos": corners[2]},
 			]
 		for cd in color_defs:
 			var v = scenes["villager"].instantiate()
@@ -1166,7 +1390,7 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 		if not is_survival:
 			var orb = scenes["villager"].instantiate()
 			containers["villagers"].add_child(orb)
-			orb.setup("magic_orb", hcenter)
+			orb.setup("magic_orb", orb_pos)
 			orb.faction_id = _faction_id_map[fi]
 
 		if not stone_rd.is_empty():
@@ -1273,6 +1497,7 @@ func _print_debug_summary() -> void:
 					RT_RIVER:    line += "R"
 					RT_QUARRY:   line += "Q"
 					RT_ENEMY_DEN: line += "E"
+					RT_DIAMOND: line += "D"
 					RT_COLORLESS_CAMP: line += "W"
 					RT_COLORLESS_PASSAGE: line += "w"
 					RT_CONTESTED: line += "X"
@@ -1280,7 +1505,7 @@ func _print_debug_summary() -> void:
 			else:
 				line += "~"
 		lines.append(line)
-	print("Layout (C=Core S=Stone R=River Q=Quarry E=Enemy W=WandererCamp w=path X=Contested .=Passage ~=Water):")
+	print("Layout (C=Core S=Stone R=River Q=Quarry E=Enemy D=Diamond W=WandererCamp w=path X=Contested .=Passage ~=Water):")
 	for line in lines:
 		print("  " + line)
 	print("=====================")

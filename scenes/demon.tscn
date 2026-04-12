@@ -3,10 +3,50 @@
 [ext_resource type="Script" path="res://scenes/demon.gd" id="1_script"]
 
 [sub_resource type="CircleShape2D" id="1_shape"]
-radius = 32.0
+radius = 40.0
 
 [node name="Demon" type="Node2D"]
 script = ExtResource("1_script")
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.3, 0.08, 0.35, 1)
+polygon = PackedVector2Array(0, -40, 38, -12.4, 23.5, 32.4, -23.5, 32.4, -38, -12.4)
+
+[node name="BodyOutline" type="Line2D" parent="."]
+points = PackedVector2Array(0, -40, 38, -12.4, 23.5, 32.4, -23.5, 32.4, -38, -12.4, 0, -40)
+width = 2.5
+default_color = Color(0.5, 0.15, 0.55, 1)
+
+[node name="HornLeft" type="Line2D" parent="."]
+points = PackedVector2Array(-12, -36, -18, -56)
+width = 3.0
+default_color = Color(0.6, 0.2, 0.1, 1)
+
+[node name="HornRight" type="Line2D" parent="."]
+points = PackedVector2Array(12, -36, 18, -56)
+width = 3.0
+default_color = Color(0.6, 0.2, 0.1, 1)
+
+[node name="EyeLeft" type="Polygon2D" parent="."]
+position = Vector2(-8, -6)
+color = Color(0.9, 0.2, 0.1, 1)
+polygon = PackedVector2Array(-5, 0, -3.5, -3.5, 0, -5, 3.5, -3.5, 5, 0, 3.5, 3.5, 0, 5, -3.5, 3.5)
+
+[node name="EyeRight" type="Polygon2D" parent="."]
+position = Vector2(8, -6)
+color = Color(0.9, 0.2, 0.1, 1)
+polygon = PackedVector2Array(-5, 0, -3.5, -3.5, 0, -5, 3.5, -3.5, 5, 0, 3.5, 3.5, 0, 5, -3.5, 3.5)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -18.0
+offset_top = 42.0
+offset_right = 18.0
+offset_bottom = 56.0
+mouse_filter = 2
+text = "DEMON"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.6, 0.2, 0.5, 0.7)
 
 [node name="InputArea" type="Area2D" parent="."]
 input_pickable = true

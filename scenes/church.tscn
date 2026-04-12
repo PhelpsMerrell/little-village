@@ -8,6 +8,65 @@ radius = 70.0
 [node name="Church" type="Node2D"]
 script = ExtResource("1_script")
 
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.35, 0.38, 0.5, 1)
+polygon = PackedVector2Array(-42, -9, 42, -9, 42, 45, -42, 45)
+
+[node name="BodyOutline" type="Line2D" parent="."]
+points = PackedVector2Array(-42, -9, 42, -9, 42, 45, -42, 45, -42, -9)
+width = 2.0
+default_color = Color(0.2, 0.22, 0.35, 1)
+
+[node name="Spire" type="Polygon2D" parent="."]
+color = Color(0.3, 0.35, 0.55, 1)
+polygon = PackedVector2Array(0, -65, 14, -9, -14, -9)
+
+[node name="SpireOutline" type="Line2D" parent="."]
+points = PackedVector2Array(0, -65, 14, -9, -14, -9, 0, -65)
+width = 2.0
+default_color = Color(0.2, 0.22, 0.35, 1)
+
+[node name="CrossV" type="Line2D" parent="."]
+points = PackedVector2Array(0, -73, 0, -61)
+width = 2.5
+default_color = Color(0.8, 0.8, 0.6, 1)
+
+[node name="CrossH" type="Line2D" parent="."]
+points = PackedVector2Array(-5, -69, 5, -69)
+width = 2.5
+default_color = Color(0.8, 0.8, 0.6, 1)
+
+[node name="Window" type="Polygon2D" parent="."]
+position = Vector2(0, -2)
+color = Color(0.2, 0.35, 0.7, 0.8)
+polygon = PackedVector2Array(-12, 0, -8.5, -8.5, 0, -12, 8.5, -8.5, 12, 0, 8.5, 8.5, 0, 12, -8.5, 8.5)
+
+[node name="Door" type="Polygon2D" parent="."]
+color = Color(0.25, 0.2, 0.15, 1)
+polygon = PackedVector2Array(-10, 13, 10, 13, 10, 45, -10, 45)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -30.0
+offset_top = -80.0
+offset_right = 30.0
+offset_bottom = -62.0
+mouse_filter = 2
+text = "CHURCH"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.6, 0.7, 0.9, 1)
+
+[node name="CountLabel" type="Label" parent="."]
+offset_left = -16.0
+offset_top = 50.0
+offset_right = 16.0
+offset_bottom = 66.0
+mouse_filter = 2
+text = "0/8"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
+
 [node name="InputArea" type="Area2D" parent="."]
 input_pickable = true
 

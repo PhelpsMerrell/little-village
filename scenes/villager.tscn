@@ -1,27 +1,107 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://cefd48ejai00j"]
 
-[ext_resource type="Script" path="res://scenes/villager.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://b7sjdlc5nwa7s" path="res://scenes/villager.gd" id="1_script"]
 
 [sub_resource type="CircleShape2D" id="1_shape"]
 radius = 22.0
 
-[node name="Villager" type="Node2D"]
+[node name="Villager" type="Node2D" unique_id=1016348490]
 script = ExtResource("1_script")
-color_type = "red"
 
-[node name="InputArea" type="Area2D" parent="."]
-input_pickable = true
+[node name="FactionGlow" type="Line2D" parent="." unique_id=1491815786]
+points = PackedVector2Array(-31, 0, -21.9, -21.9, 0, -31, 21.9, -21.9, 31, 0, 21.9, 21.9, 0, 31, -21.9, 21.9, -31, 0)
+width = 6.0
+default_color = Color(1, 1, 1, 0.35)
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="InputArea"]
-shape = SubResource("1_shape")
+[node name="FactionRing" type="Line2D" parent="." unique_id=886857474]
+points = PackedVector2Array(-28, 0, -19.8, -19.8, 0, -28, 19.8, -19.8, 28, 0, 19.8, 19.8, 0, 28, -19.8, 19.8, -28, 0)
+width = 5.0
 
-[node name="ShiftLabel" type="Label" parent="."]
+[node name="L1Body" type="Polygon2D" parent="." unique_id=1811548225]
+color = Color(0.85, 0.2, 0.15, 1)
+polygon = PackedVector2Array(-22, 0, -15.6, -15.6, 0, -22, 15.6, -15.6, 22, 0, 15.6, 15.6, 0, 22, -15.6, 15.6)
+
+[node name="L1Outline" type="Line2D" parent="." unique_id=532134132]
+points = PackedVector2Array(-22, 0, -15.6, -15.6, 0, -22, 15.6, -15.6, 22, 0, 15.6, 15.6, 0, 22, -15.6, 15.6, -22, 0)
+width = 2.5
+default_color = Color(0.12, 0.12, 0.12, 1)
+
+[node name="L2Body" type="Polygon2D" parent="." unique_id=199952301]
+visible = false
+color = Color(0.85, 0.2, 0.15, 1)
+polygon = PackedVector2Array(-18.7, -18.7, 18.7, -18.7, 18.7, 18.7, -18.7, 18.7)
+
+[node name="L2Outline" type="Line2D" parent="." unique_id=1679949340]
+visible = false
+points = PackedVector2Array(-18.7, -18.7, 18.7, -18.7, 18.7, 18.7, -18.7, 18.7, -18.7, -18.7)
+width = 2.5
+default_color = Color(0.12, 0.12, 0.12, 1)
+
+[node name="L3Body" type="Polygon2D" parent="." unique_id=2059904879]
+visible = false
+color = Color(0.85, 0.2, 0.15, 1)
+polygon = PackedVector2Array(0, -22, 19, 11, -19, 11)
+
+[node name="L3Outline" type="Line2D" parent="." unique_id=1149901908]
+visible = false
+points = PackedVector2Array(0, -22, 19, 11, -19, 11, 0, -22)
+width = 2.5
+default_color = Color(0.12, 0.12, 0.12, 1)
+
+[node name="FactionSymbol" type="Label" parent="." unique_id=916255824]
+offset_left = -10.0
+offset_top = -8.0
+offset_right = 10.0
+offset_bottom = 8.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CarryIndicator" type="Polygon2D" parent="." unique_id=414136579]
+visible = false
+position = Vector2(0, -28)
+color = Color(0.5, 0.52, 0.48, 1)
+polygon = PackedVector2Array(-7, 0, -5, -5, 0, -7, 5, -5, 7, 0, 5, 5, 0, 7, -5, 5)
+
+[node name="SelectionRing" type="Line2D" parent="." unique_id=283512126]
+visible = false
+points = PackedVector2Array(-28, 0, -19.8, -19.8, 0, -28, 19.8, -19.8, 28, 0, 19.8, 19.8, 0, 28, -19.8, 19.8, -28, 0)
+width = 2.5
+default_color = Color(1, 1, 1, 0.8)
+
+[node name="CommandLabel" type="Label" parent="." unique_id=1722438889]
+visible = false
+offset_left = -20.0
+offset_top = -52.0
+offset_right = 20.0
+offset_bottom = -36.0
+theme_override_colors/font_color = Color(1, 0.8, 0.2, 0.8)
+theme_override_font_sizes/font_size = 9
+horizontal_alignment = 1
+
+[node name="HungerLabel" type="Label" parent="." unique_id=635961267]
+visible = false
+offset_left = -18.0
+offset_top = -50.0
+offset_right = 22.0
+offset_bottom = -36.0
+theme_override_colors/font_color = Color(1.0000322, 0.79927987, 1.0039686, 0.8)
+theme_override_font_sizes/font_size = 9
+text = "HUNGRY"
+horizontal_alignment = 1
+
+[node name="ShiftLabel" type="Label" parent="." unique_id=2000819645]
 offset_left = -22.0
 offset_top = -8.0
 offset_right = 22.0
 offset_bottom = 8.0
-mouse_filter = 2
+theme_override_colors/font_color = Color(0.05, 0.05, 0.05, 1)
+theme_override_font_sizes/font_size = 13
 horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_font_sizes/font_size = 13
-theme_override_colors/font_color = Color(0.05, 0.05, 0.05, 1)
+
+[node name="InputArea" type="Area2D" parent="." unique_id=1076328907]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="InputArea" unique_id=1927800856]
+shape = SubResource("1_shape")

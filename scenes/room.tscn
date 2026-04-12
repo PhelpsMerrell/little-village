@@ -10,3 +10,28 @@ offset_right = 1350.0
 offset_bottom = 1350.0
 mouse_filter = 2
 color = Color(0.15, 0.15, 0.15, 0.35)
+
+[node name="Border" type="Line2D" parent="."]
+points = PackedVector2Array(0, 0, 1350, 0, 1350, 1350, 0, 1350, 0, 0)
+width = 2.0
+default_color = Color(0.3, 0.3, 0.3, 0.4)
+
+[node name="RoomLabel" type="Label" parent="."]
+offset_left = 10.0
+offset_top = 4.0
+offset_right = 300.0
+offset_bottom = 26.0
+mouse_filter = 2
+text = "Room"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.45, 0.45, 0.45, 0.6)
+
+[node name="OwnerSymbol" type="Label" parent="."]
+offset_left = 1310.0
+offset_top = 4.0
+offset_right = 1346.0
+offset_bottom = 26.0
+mouse_filter = 2
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 0.7)

@@ -27,7 +27,7 @@ func _ready() -> void:
 
 func _ensure_faction(fid: int) -> void:
 	if not _faction_resources.has(fid):
-		_faction_resources[fid] = {"stone": 0, "fish": 0}
+		_faction_resources[fid] = {"stone": 0, "fish": 0, "diamonds": 0}
 
 
 func get_stone(fid: int) -> int:
@@ -79,6 +79,25 @@ func add_fish(amount: int = 1, fid: int = -1) -> void:
 		fid = FactionManager.local_faction_id
 	_ensure_faction(fid)
 	_faction_resources[fid]["fish"] += amount
+	currency_changed.emit()
+
+
+func get_diamonds(fid: int) -> int:
+	_ensure_faction(fid)
+	return int(_faction_resources[fid]["diamonds"])
+
+
+func set_diamonds(fid: int, amount: int) -> void:
+	_ensure_faction(fid)
+	_faction_resources[fid]["diamonds"] = amount
+	currency_changed.emit()
+
+
+func add_diamonds(amount: int = 1, fid: int = -1) -> void:
+	if fid < 0:
+		fid = FactionManager.local_faction_id
+	_ensure_faction(fid)
+	_faction_resources[fid]["diamonds"] += amount
 	currency_changed.emit()
 
 

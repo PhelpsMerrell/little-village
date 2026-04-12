@@ -1,0 +1,678 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scenes/hud.gd" id="1_hud"]
+
+[sub_resource type="StyleBoxFlat" id="bar_style"]
+bg_color = Color(0.08, 0.08, 0.1, 0.85)
+
+[sub_resource type="StyleBoxFlat" id="pop_style"]
+bg_color = Color(0.06, 0.06, 0.08, 0.8)
+border_color = Color(0.3, 0.3, 0.3, 0.3)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="sel_style"]
+bg_color = Color(0.06, 0.06, 0.08, 0.88)
+border_color = Color(0.4, 0.4, 0.4, 0.3)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="bld_style"]
+bg_color = Color(0.06, 0.06, 0.08, 0.88)
+border_color = Color(0.4, 0.4, 0.4, 0.3)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="score_style"]
+bg_color = Color(0.04, 0.04, 0.06, 0.92)
+border_color = Color(0.5, 0.5, 0.5, 0.3)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+
+[sub_resource type="StyleBoxFlat" id="feed_style"]
+bg_color = Color(0.05, 0.05, 0.08, 0.45)
+border_color = Color(0.35, 0.35, 0.4, 0.25)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="shop_style"]
+bg_color = Color(0.06, 0.06, 0.08, 0.9)
+border_color = Color(0.4, 0.4, 0.4, 0.4)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+
+[sub_resource type="StyleBoxFlat" id="tut_style"]
+bg_color = Color(0, 0, 0, 0.78)
+border_color = Color(0.9, 0.85, 0.4, 0.6)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+
+[node name="HUD" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+; ── Day/Night Bar ──────────────────────────────────────────────
+
+[node name="DayNightBar" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 48.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("bar_style")
+
+[node name="DayBg" type="ColorRect" parent="DayNightBar"]
+layout_mode = 1
+anchor_right = 0.55
+offset_bottom = 48.0
+color = Color(0.35, 0.32, 0.15, 0.4)
+mouse_filter = 2
+
+[node name="NightBg" type="ColorRect" parent="DayNightBar"]
+layout_mode = 1
+anchor_left = 0.55
+anchor_right = 1.0
+offset_bottom = 48.0
+color = Color(0.08, 0.08, 0.2, 0.4)
+mouse_filter = 2
+
+[node name="ProgressLine" type="ColorRect" parent="DayNightBar"]
+layout_mode = 1
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 4.0
+offset_bottom = 48.0
+color = Color(1, 1, 1, 0.9)
+mouse_filter = 2
+
+[node name="DayLabel" type="Label" parent="DayNightBar"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 8.0
+offset_right = 80.0
+offset_bottom = 38.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.9, 0.85, 0.4, 0.6)
+text = "DAY"
+
+[node name="NightLabel" type="Label" parent="DayNightBar"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 200.0
+offset_top = 8.0
+offset_right = 300.0
+offset_bottom = 38.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.5, 0.5, 0.8, 0.6)
+text = "NIGHT"
+
+[node name="TimeLabel" type="Label" parent="DayNightBar"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -80.0
+offset_top = 8.0
+offset_right = 80.0
+offset_bottom = 40.0
+theme_override_font_sizes/font_size = 24
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+horizontal_alignment = 1
+
+[node name="PausedLabel" type="Label" parent="DayNightBar"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -60.0
+offset_top = 40.0
+offset_right = 60.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(1, 0.8, 0.2, 0.8)
+text = "PAUSED"
+horizontal_alignment = 1
+visible = false
+
+; ── Population Panel (bottom-left) ─────────────────────────────
+
+[node name="PopPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = -220.0
+offset_right = 420.0
+offset_bottom = 0.0
+grow_vertical = 0
+theme_override_styles/panel = SubResource("pop_style")
+
+[node name="FactionLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 6.0
+offset_right = 200.0
+offset_bottom = 30.0
+theme_override_font_sizes/font_size = 20
+
+[node name="RedLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 36.0
+offset_right = 200.0
+offset_bottom = 56.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "● Red: 0"
+
+[node name="YellowLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 60.0
+offset_right = 200.0
+offset_bottom = 80.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "● Yellow: 0"
+
+[node name="BlueLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 84.0
+offset_right = 200.0
+offset_bottom = 104.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "● Blue: 0"
+
+[node name="ColorlessLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 108.0
+offset_right = 200.0
+offset_bottom = 128.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "● Colorless: 0"
+
+[node name="EnemiesLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 250.0
+offset_top = 36.0
+offset_right = 410.0
+offset_bottom = 56.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.8, 0.2, 0.2, 1)
+text = "Enemies: 0"
+
+[node name="PopLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 250.0
+offset_top = 60.0
+offset_right = 410.0
+offset_bottom = 80.0
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.65, 0.65, 0.65, 1)
+text = "Pop: 0 / 50"
+
+[node name="StoneLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 275.0
+offset_top = 102.0
+offset_right = 410.0
+offset_bottom = 122.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.6, 0.65, 0.55, 1)
+text = "Stone: 0"
+
+[node name="FishLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 275.0
+offset_top = 130.0
+offset_right = 410.0
+offset_bottom = 150.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.4, 0.65, 0.8, 1)
+text = "Fish: 0"
+
+[node name="HintsLabel" type="Label" parent="PopPanel"]
+layout_mode = 1
+offset_left = 16.0
+offset_top = 170.0
+offset_right = 400.0
+offset_bottom = 190.0
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.4, 0.4, 0.45, 1)
+text = "Shift: Hover-select  |  Tab: Scoreboard"
+
+[node name="StoneDot" type="ColorRect" parent="PopPanel"]
+layout_mode = 1
+offset_left = 252.0
+offset_top = 108.0
+offset_right = 268.0
+offset_bottom = 124.0
+color = Color(0.5, 0.52, 0.48, 1)
+mouse_filter = 2
+
+[node name="FishDot" type="ColorRect" parent="PopPanel"]
+layout_mode = 1
+offset_left = 252.0
+offset_top = 136.0
+offset_right = 268.0
+offset_bottom = 152.0
+color = Color(0.3, 0.55, 0.75, 1)
+mouse_filter = 2
+
+; ── Pending Command Label ──────────────────────────────────────
+
+[node name="PendingCmdLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -230.0
+offset_right = 400.0
+offset_bottom = -222.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.9, 0.9, 0.3, 0.9)
+visible = false
+
+; ── Selection Panel (bottom-right) ─────────────────────────────
+
+[node name="SelectionPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -390.0
+offset_top = -290.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
+visible = false
+theme_override_styles/panel = SubResource("sel_style")
+
+[node name="SelectedHeader" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 4.0
+offset_right = 200.0
+offset_bottom = 22.0
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.6, 0.6, 0.65, 1)
+text = "SELECTED (0)"
+
+[node name="TypeCounts" type="VBoxContainer" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 26.0
+offset_right = 230.0
+offset_bottom = 140.0
+
+[node name="VillagerDetails" type="VBoxContainer" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 140.0
+offset_right = 230.0
+offset_bottom = 210.0
+
+[node name="FactionSep" type="ColorRect" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 8.0
+offset_top = 214.0
+offset_right = 202.0
+offset_bottom = 215.0
+color = Color(0.3, 0.3, 0.35, 0.6)
+mouse_filter = 2
+
+[node name="FactionBg" type="ColorRect" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 0.0
+offset_top = 218.0
+offset_right = 216.0
+offset_bottom = 280.0
+color = Color(0.5, 0.5, 0.5, 0.14)
+mouse_filter = 2
+
+[node name="FactionSymbol" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 228.0
+offset_right = 50.0
+offset_bottom = 276.0
+theme_override_font_sizes/font_size = 40
+
+[node name="FactionTitle" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 56.0
+offset_top = 228.0
+offset_right = 200.0
+offset_bottom = 244.0
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 0.6)
+text = "FACTION"
+
+[node name="FactionName" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 56.0
+offset_top = 248.0
+offset_right = 200.0
+offset_bottom = 272.0
+theme_override_font_sizes/font_size = 20
+
+[node name="MixedFactionLabel" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 248.0
+offset_right = 200.0
+offset_bottom = 272.0
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.6, 0.5, 0.3, 1)
+text = "Mixed Factions"
+visible = false
+
+[node name="CommandsHeader" type="Label" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 240.0
+offset_top = 4.0
+offset_right = 380.0
+offset_bottom = 22.0
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.6, 0.6, 0.65, 1)
+text = "COMMANDS"
+
+[node name="CommandsContainer" type="VBoxContainer" parent="SelectionPanel"]
+layout_mode = 1
+offset_left = 240.0
+offset_top = 28.0
+offset_right = 380.0
+offset_bottom = 280.0
+theme_override_constants/separation = 6
+
+; ── Building Panel (bottom-right) ──────────────────────────────
+
+[node name="BuildingPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -390.0
+offset_top = -210.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
+visible = false
+theme_override_styles/panel = SubResource("bld_style")
+
+[node name="BuildingHeader" type="Label" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 4.0
+offset_right = 200.0
+offset_bottom = 22.0
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.6, 0.6, 0.65, 1)
+text = "BUILDING"
+
+[node name="BuildingIcon" type="Control" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 38.0
+offset_right = 106.0
+offset_bottom = 108.0
+mouse_filter = 2
+
+[node name="BuildingType" type="Label" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 110.0
+offset_right = 200.0
+offset_bottom = 134.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+
+[node name="BuildingSheltered" type="Label" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 134.0
+offset_right = 200.0
+offset_bottom = 154.0
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.65, 0.65, 0.7, 1)
+
+[node name="BuildingOwner" type="Label" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 154.0
+offset_right = 200.0
+offset_bottom = 174.0
+theme_override_font_sizes/font_size = 18
+
+[node name="ActionsHeader" type="Label" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 240.0
+offset_top = 4.0
+offset_right = 380.0
+offset_bottom = 22.0
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.6, 0.6, 0.65, 1)
+text = "ACTIONS"
+
+[node name="EvictBtn" type="Button" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 240.0
+offset_top = 28.0
+offset_right = 360.0
+offset_bottom = 68.0
+text = "Evict All"
+
+[node name="SellBtn" type="Button" parent="BuildingPanel"]
+layout_mode = 1
+offset_left = 240.0
+offset_top = 78.0
+offset_right = 360.0
+offset_bottom = 118.0
+text = "Sell"
+
+; ── Score Overlay (center) ─────────────────────────────────────
+
+[node name="ScoreOverlay" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -290.0
+offset_top = 100.0
+offset_right = 290.0
+offset_bottom = 500.0
+visible = false
+theme_override_styles/panel = SubResource("score_style")
+
+[node name="ScoreTitle" type="Label" parent="ScoreOverlay"]
+layout_mode = 1
+offset_left = 20.0
+offset_top = 6.0
+offset_right = 300.0
+offset_bottom = 32.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.9, 0.85, 0.6, 1)
+text = "SCOREBOARD"
+
+[node name="CloseHint" type="Label" parent="ScoreOverlay"]
+layout_mode = 1
+offset_left = 460.0
+offset_top = 10.0
+offset_right = 570.0
+offset_bottom = 28.0
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.45, 0.45, 0.5, 1)
+text = "Tab to close"
+
+[node name="ScoreHeaders" type="HBoxContainer" parent="ScoreOverlay"]
+layout_mode = 1
+offset_left = 20.0
+offset_top = 36.0
+offset_right = 560.0
+offset_bottom = 50.0
+
+[node name="ScoreRows" type="VBoxContainer" parent="ScoreOverlay"]
+layout_mode = 1
+offset_left = 0.0
+offset_top = 56.0
+offset_right = 580.0
+offset_bottom = 400.0
+theme_override_constants/separation = 2
+
+; ── Event Feed (right side) ────────────────────────────────────
+
+[node name="FeedPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -356.0
+offset_top = 0.0
+offset_right = -16.0
+offset_bottom = 200.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("feed_style")
+
+[node name="FeedHeader" type="Label" parent="FeedPanel"]
+layout_mode = 1
+offset_left = 8.0
+offset_top = 4.0
+offset_right = 330.0
+offset_bottom = 24.0
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.55, 0.55, 0.6, 1)
+text = "Events (click to expand)"
+
+[node name="FeedLines" type="VBoxContainer" parent="FeedPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 34.0
+offset_right = 330.0
+offset_bottom = 195.0
+
+[node name="FeedScrollHint" type="Label" parent="FeedPanel"]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -60.0
+offset_top = -18.0
+offset_right = 60.0
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.45, 0.45, 0.5, 1)
+text = "Scroll for more..."
+horizontal_alignment = 1
+visible = false
+
+; ── Shop Panel (right side) ────────────────────────────────────
+
+[node name="ShopPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -320.0
+offset_top = 80.0
+offset_right = 0.0
+offset_bottom = 400.0
+grow_horizontal = 0
+visible = false
+theme_override_styles/panel = SubResource("shop_style")
+
+[node name="ShopHeader" type="Label" parent="ShopPanel"]
+layout_mode = 1
+offset_left = 14.0
+offset_top = 10.0
+offset_right = 290.0
+offset_bottom = 40.0
+theme_override_font_sizes/font_size = 24
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+text = "SHOP (B to close)"
+
+[node name="ShopItems" type="VBoxContainer" parent="ShopPanel"]
+layout_mode = 1
+offset_left = 5.0
+offset_top = 50.0
+offset_right = 295.0
+offset_bottom = 390.0
+theme_override_constants/separation = 10
+
+; ── Tutorial Overlay (top center) ──────────────────────────────
+
+[node name="TutorialOverlay" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -300.0
+offset_top = 56.0
+offset_right = 300.0
+offset_bottom = 118.0
+visible = false
+theme_override_styles/panel = SubResource("tut_style")
+
+[node name="InstructionLabel" type="Label" parent="TutorialOverlay"]
+layout_mode = 1
+offset_left = 14.0
+offset_top = 6.0
+offset_right = 586.0
+offset_bottom = 30.0
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.95, 0.9, 0.7, 1)
+autowrap_mode = 2
+
+[node name="PhaseLabel" type="Label" parent="TutorialOverlay"]
+layout_mode = 1
+offset_left = 14.0
+offset_top = 34.0
+offset_right = 586.0
+offset_bottom = 54.0
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+
+[node name="ResetBtn" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -200.0
+offset_top = 62.0
+offset_right = -30.0
+offset_bottom = 106.0
+visible = false
+text = "RESET TUTORIAL"

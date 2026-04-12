@@ -20,8 +20,16 @@ const SHOOT_COOLDOWN := 1.0
 const FLEE_DIST := 250.0
 const FRONTLINE_DIST := 80.0
 const RED_BEHIND_BLUE_DIST := 60.0
-const WANDER_PAUSE_MIN := 0.8
-const WANDER_PAUSE_MAX := 2.5
+const WANDER_PAUSE_MIN := 2.0
+const WANDER_PAUSE_MAX := 5.5
+const IDLE_STAND_CHANCE := 0.60
+const IDLE_LOCAL_STEP_CHANCE := 0.50
+const IDLE_BUILDING_VISIT_CHANCE := 0.35
+const IDLE_SOCIAL_VISIT_CHANCE := 0.35
+const IDLE_ROOM_TRAVEL_CHANCE := 0.30
+const IDLE_JIGGLE_RADIUS := 18.0
+const IDLE_LOCAL_STEP_MIN := 14.0
+const IDLE_LOCAL_STEP_MAX := 34.0
 const SEPARATION_DIST := 8.0
 const SEPARATION_FORCE := 0.4
 
@@ -29,7 +37,8 @@ const SEPARATION_FORCE := 0.4
 
 var faction_id: int = 0  ## Which faction owns this villager (0 = local player in solo)
 var net_id: int = -1  ## Unique ID for network command targeting
-var villager_name: String = ""  ## Display name
+var villager_name: String = ""  ## Display name (lineage base name)
+var generation: int = 1  ## Generational counter for lineage display
 var is_puppet: bool = false  ## Client-side puppet: interpolates, no brain
 var interp_target: Vector2 = Vector2.ZERO  ## Target position for puppet interpolation
 
@@ -94,9 +103,16 @@ var brain_has_resource: bool = false
 var waypoint_target_pos: Vector2 = Vector2.ZERO
 var has_waypoint: bool = false
 
+## Work room assignment: villager loops collecting in this room
+var assigned_room_id: int = -1  ## -1 = no assignment
+
 ## Church healing: main.gd sets these for damaged blues
 var brain_church_pos: Vector2 = Vector2.ZERO
 var brain_has_church: bool = false
+
+## Idle world awareness: main.gd can populate these for calmer town behavior
+var brain_buildings: Array = []  # building nodes in the room / nearby
+var brain_room_centers: Array = []  # Vector2 room centers reachable through open doors
 
 ## Colorless attraction: main.gd sets when a controlled villager is nearby
 var colorless_attract_pos: Vector2 = Vector2.ZERO
@@ -135,6 +151,19 @@ const DEATH_TWITCH_DURATION := 1.2
 @onready var _area: Area2D = $InputArea
 @onready var _col_shape: CollisionShape2D = $InputArea/CollisionShape2D
 @onready var _label: Label = $ShiftLabel
+@onready var _faction_glow: Line2D = $FactionGlow
+@onready var _faction_ring: Line2D = $FactionRing
+@onready var _l1_body: Polygon2D = $L1Body
+@onready var _l1_outline: Line2D = $L1Outline
+@onready var _l2_body: Polygon2D = $L2Body
+@onready var _l2_outline: Line2D = $L2Outline
+@onready var _l3_body: Polygon2D = $L3Body
+@onready var _l3_outline: Line2D = $L3Outline
+@onready var _faction_symbol: Label = $FactionSymbol
+@onready var _carry_indicator: Polygon2D = $CarryIndicator
+@onready var _selection_ring: Line2D = $SelectionRing
+@onready var _command_label: Label = $CommandLabel
+@onready var _hunger_label: Label = $HungerLabel
 
 signal resource_dropped(villager: Node2D, resource_type: String)
 
@@ -173,6 +202,23 @@ func set_level(new_level: int) -> void:
 func record_kill() -> void: kill_count += 1
 func is_carrying() -> bool: return carrying_resource != ""
 
+func get_display_name() -> String:
+	if villager_name.is_empty():
+		return color_type.capitalize()
+	if generation <= 1:
+		return villager_name
+	return "%s %s" % [villager_name, _to_roman(generation)]
+
+static func _to_roman(num: int) -> String:
+	var result := ""
+	var values := [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+	var numerals := ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+	for i in values.size():
+		while num >= values[i]:
+			result += numerals[i]
+			num -= values[i]
+	return result
+
 func get_influence_multiplier() -> float:
 	match level:
 		2: return 0.2
@@ -195,6 +241,15 @@ func _sync_definition() -> void:
 	if _label:
 		_label.position = Vector2(-radius, -radius * 0.35)
 		_label.size = Vector2(radius * 2.0, radius * 0.7)
+	# Scale scene body nodes to match radius
+	if _l1_body:
+		var s: float = radius / 22.0  # base polygon was designed for radius 22
+		for node in [_l1_body, _l1_outline, _l2_body, _l2_outline, _l3_body, _l3_outline]:
+			if node: node.scale = Vector2(s, s)
+		# Scale faction rings
+		if _faction_ring: _faction_ring.scale = Vector2(s, s)
+		if _faction_glow: _faction_glow.scale = Vector2(s, s)
+		if _selection_ring: _selection_ring.scale = Vector2(s, s)
 
 func _process(delta: float) -> void:
 	if _dying:
@@ -214,6 +269,7 @@ func _process(delta: float) -> void:
 				global_position = global_position.lerp(interp_target, clampf(delta * 14.0, 0.0, 1.0))
 		_update_label()
 		_shot_flash_timer = maxf(0.0, _shot_flash_timer - delta)
+		_update_visuals()
 		queue_redraw()
 		return
 	_update_label()
@@ -222,6 +278,7 @@ func _process(delta: float) -> void:
 	# Stun tick
 	if _stun_timer > 0.0:
 		_stun_timer -= delta
+		_update_visuals()
 		queue_redraw()
 		return
 	# L3 lifespan countdown (host-only; puppet state synced via snapshot)
@@ -232,6 +289,7 @@ func _process(delta: float) -> void:
 			return
 	if not _dragging and _move_speed > 0.0:
 		_evaluate_brain(delta); _do_movement(delta); _apply_separation()
+	_update_visuals()
 	queue_redraw()
 
 func _update_label() -> void:
@@ -331,6 +389,7 @@ func command_move_to(pos: Vector2) -> void:
 	command_target = pos
 	break_door_node = null
 	break_door_target = Vector2.ZERO
+	assigned_room_id = -1  # clear work assignment on manual move
 
 func command_hold() -> void:
 	command_mode = "hold"
@@ -341,6 +400,7 @@ func command_release() -> void:
 	combat_mode = ""
 	break_door_target = Vector2.ZERO
 	break_door_node = null
+	assigned_room_id = -1
 
 func command_attack(target: Node) -> void:
 	combat_target = target
@@ -387,12 +447,14 @@ func _check_job() -> bool:
 				if has_deposit_in_room:
 					_brain_state = "deposit"; _set_target(deposit_position); return true
 				elif deposit_position != Vector2.ZERO:
-					# Cross-room: walk toward bank
 					_brain_state = "deposit_cross"; _set_target(deposit_position); return true
 				else:
 					_brain_state = "carry_wander"; return false
 			elif has_waypoint: _brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
 			elif brain_has_resource: _brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
+			elif assigned_room_id >= 0:
+				# Return to assigned room to keep collecting
+				_brain_state = "waypoint"; _set_target(_get_assigned_room_center()); return true
 		"blue":
 			if not is_carrying() and brain_has_church and health < max_health:
 				_brain_state = "seek_church"; _set_target(brain_church_pos); return true
@@ -405,29 +467,129 @@ func _check_job() -> bool:
 					_brain_state = "carry_wander"; return false
 			elif has_waypoint: _brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
 			elif brain_has_resource: _brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
+			elif assigned_room_id >= 0:
+				_brain_state = "waypoint"; _set_target(_get_assigned_room_center()); return true
 		"red": pass
 		"colorless":
-			if has_attract_target:
-				_brain_state = "attract"
-				_set_target(colorless_attract_pos)
-				return true
+			pass
 	return false
 
+
+func _get_assigned_room_center() -> Vector2:
+	## Get center of assigned room for return-to-work navigation.
+	if room_bounds.has_area() and current_room_id == assigned_room_id:
+		return room_bounds.get_center()
+	# Room center will be set by main.gd via brain_room_centers or waypoint
+	return waypoint_target_pos if has_waypoint else global_position
+
 func _check_influence() -> bool:
-	if not is_being_influenced: return false
-	_brain_state = "influence"
-	var inf_range: float = radius * 15.0  # match INFLUENCE_RANGE_MULT
-	var angle: float = GameRNG.randf() * TAU
-	var dist: float = GameRNG.randf_range(inf_range * 0.4, inf_range * 0.8)
-	_set_target_clamped(influence_attractor + Vector2(cos(angle), sin(angle)) * dist)
-	return true
+	# Influence still changes shift_meter elsewhere, but it should not hard-override idle movement.
+	return false
 
 func _do_idle_brain() -> void:
 	_brain_state = "idle"
-	if _arrived:
-		_idle_timer -= get_process_delta_time()
-		if _idle_timer <= 0.0:
-			_idle_timer = GameRNG.randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX); _pick_random_target()
+	if not _arrived:
+		return
+
+	_idle_timer -= get_process_delta_time()
+	if _idle_timer > 0.0:
+		return
+
+	_idle_timer = GameRNG.randf_range(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
+	_pick_idle_behavior()
+
+
+func _pick_idle_behavior() -> void:
+	var roll: float = GameRNG.randf()
+
+	if roll < IDLE_STAND_CHANCE:
+		_pick_idle_stand_or_jiggle()
+		return
+
+	roll = (roll - IDLE_STAND_CHANCE) / maxf(0.001, 1.0 - IDLE_STAND_CHANCE)
+
+	if roll < IDLE_BUILDING_VISIT_CHANCE and _pick_idle_building_visit():
+		return
+	roll = (roll - IDLE_BUILDING_VISIT_CHANCE) / maxf(0.001, 1.0 - IDLE_BUILDING_VISIT_CHANCE)
+
+	if roll < IDLE_SOCIAL_VISIT_CHANCE and _pick_idle_social_visit():
+		return
+	roll = (roll - IDLE_SOCIAL_VISIT_CHANCE) / maxf(0.001, 1.0 - IDLE_SOCIAL_VISIT_CHANCE)
+
+	if roll < IDLE_ROOM_TRAVEL_CHANCE and _pick_idle_room_visit():
+		return
+
+	if not _pick_local_idle_step():
+		_arrived = true
+
+
+func _pick_idle_stand_or_jiggle() -> void:
+	if GameRNG.randf() < IDLE_LOCAL_STEP_CHANCE:
+		if _pick_local_idle_step(IDLE_JIGGLE_RADIUS):
+			return
+	_arrived = true
+
+
+func _pick_local_idle_step(max_dist: float = IDLE_LOCAL_STEP_MAX) -> bool:
+	for _attempt in 10:
+		var angle: float = GameRNG.randf() * TAU
+		var dist: float = GameRNG.randf_range(IDLE_LOCAL_STEP_MIN, max_dist)
+		var target := global_position + Vector2(cos(angle), sin(angle)) * dist
+		if room_bounds.has_area():
+			var m := radius + 6.0
+			target.x = clampf(target.x, room_bounds.position.x + m, room_bounds.end.x - m)
+			target.y = clampf(target.y, room_bounds.position.y + m, room_bounds.end.y - m)
+		if _is_reachable(target) and not _wall_blocks(global_position, target):
+			_set_target(target)
+			return true
+	return false
+
+
+func _pick_idle_building_visit() -> bool:
+	var candidates: Array = []
+	for b in brain_buildings:
+		if not is_instance_valid(b):
+			continue
+		if b == self:
+			continue
+		if "placed_by_faction" in b and int(b.placed_by_faction) >= 0 and int(b.placed_by_faction) != faction_id:
+			continue
+		candidates.append(b)
+	if candidates.is_empty():
+		return false
+	var building = candidates[GameRNG.randi() % candidates.size()]
+	var offset := Vector2(GameRNG.randf_range(-20.0, 20.0), GameRNG.randf_range(18.0, 36.0))
+	_set_target(building.global_position + offset)
+	return true
+
+
+func _pick_idle_social_visit() -> bool:
+	var candidates: Array = []
+	for other in brain_room_villagers:
+		if not is_instance_valid(other) or other == self:
+			continue
+		if other.get("_dying"):
+			continue
+		candidates.append(other)
+	if candidates.is_empty():
+		return false
+	var other = candidates[GameRNG.randi() % candidates.size()]
+	var dir := Vector2.RIGHT.rotated(GameRNG.randf() * TAU)
+	_set_target(other.global_position + dir * GameRNG.randf_range(radius * 1.5, radius * 2.5))
+	return true
+
+
+func _pick_idle_room_visit() -> bool:
+	if brain_room_centers.is_empty():
+		return false
+	var candidates: Array = []
+	for center in brain_room_centers:
+		if center is Vector2 and global_position.distance_to(center) > 48.0:
+			candidates.append(center)
+	if candidates.is_empty():
+		return false
+	_set_target(candidates[GameRNG.randi() % candidates.size()])
+	return true
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -680,106 +842,142 @@ func _input(event: InputEvent) -> void:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DRAWING
+# VISUALS — scene node updates
 # ══════════════════════════════════════════════════════════════════════════════
+
+func _update_visuals() -> void:
+	if _dying or not _l1_body:
+		return
+	var def: Dictionary = ColorRegistry.get_def(color_type)
+	var base_color: Color = def.get("display_color", Color.WHITE)
+	var next_id: String = def.get("shifts_to", "")
+	var draw_color := base_color
+	if not next_id.is_empty() and shift_meter > 0.0:
+		draw_color = base_color.lerp(ColorRegistry.get_def(next_id).get("display_color", Color.WHITE), shift_meter / 100.0)
+	if color_type == "red" and not is_fed:
+		draw_color = draw_color.darkened(0.3 * (0.5 + sin(Time.get_ticks_msec() * 0.005) * 0.2))
+
+	# Level shape visibility
+	_l1_body.visible = (level == 1)
+	_l1_outline.visible = (level == 1)
+	_l2_body.visible = (level == 2)
+	_l2_outline.visible = (level == 2)
+	_l3_body.visible = (level == 3)
+	_l3_outline.visible = (level == 3)
+
+	# Body color
+	_l1_body.color = draw_color
+	_l2_body.color = draw_color
+	_l3_body.color = draw_color
+
+	# Outline color (faction border)
+	var border_col: Color = FactionManager.get_faction_color(faction_id) if faction_id >= 0 else Color(0.12, 0.12, 0.12)
+	_l1_outline.default_color = border_col
+	_l2_outline.default_color = border_col
+	_l3_outline.default_color = border_col
+
+	# Faction ring
+	if faction_id >= 0:
+		var fcolor: Color = FactionManager.get_faction_color(faction_id)
+		_faction_ring.visible = true
+		_faction_ring.default_color = fcolor
+		_faction_glow.visible = true
+		_faction_glow.default_color = Color(fcolor.r, fcolor.g, fcolor.b, 0.35)
+	else:
+		_faction_ring.visible = false
+		_faction_glow.visible = false
+
+	# Faction symbol
+	if faction_id >= 0 and color_type != "magic_orb":
+		_faction_symbol.visible = true
+		_faction_symbol.text = FactionManager.get_faction_symbol(faction_id)
+		var fc: Color = FactionManager.get_faction_color(faction_id)
+		fc.a = 1.0
+		_faction_symbol.add_theme_color_override("font_color", fc)
+	else:
+		_faction_symbol.visible = false
+
+	# Carry indicator
+	if is_carrying():
+		_carry_indicator.visible = true
+		_carry_indicator.position = Vector2(0, -radius - 6)
+		match carrying_resource:
+			"stone": _carry_indicator.color = Color(0.5, 0.52, 0.48)
+			"diamond": _carry_indicator.color = Color(0.4, 0.85, 0.95)
+			"fish": _carry_indicator.color = Color(0.3, 0.55, 0.75)
+	else:
+		_carry_indicator.visible = false
+
+	# Selection ring
+	if is_selected:
+		_selection_ring.visible = true
+		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
+		_selection_ring.default_color = Color(1.0, 1.0, 1.0, pulse)
+	else:
+		_selection_ring.visible = false
+
+	# Command label
+	if command_mode == "hold":
+		_command_label.visible = true
+		_command_label.text = "HOLD"
+		_command_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2, 0.8))
+	elif command_mode == "break_door":
+		_command_label.visible = true
+		_command_label.text = "BREAK"
+		_command_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.1, 0.9))
+	else:
+		_command_label.visible = false
+
+	# Hunger label
+	_hunger_label.visible = (color_type == "red" and not is_fed)
+
 
 func _draw() -> void:
 	if _dying:
 		_draw_death_twitch()
 		return
 	var def: Dictionary = ColorRegistry.get_def(color_type)
-	var base_color: Color = def.get("display_color", Color.WHITE)
 	var next_id: String = def.get("shifts_to", "")
 	var bar_w := radius * 2.0
-	var draw_color := base_color
-	if not next_id.is_empty() and shift_meter > 0.0:
-		draw_color = base_color.lerp(ColorRegistry.get_def(next_id).get("display_color", Color.WHITE), shift_meter / 100.0)
-	if color_type == "red" and not is_fed:
-		draw_color = draw_color.darkened(0.3 * (0.5 + sin(Time.get_ticks_msec() * 0.005) * 0.2))
-	# Faction ring — drawn before body so body renders on top
-	if faction_id >= 0:
-		var fcolor: Color = FactionManager.get_faction_color(faction_id)
-		# Outer glow ring
-		draw_arc(Vector2.ZERO, radius + 9.0, 0.0, TAU, 40, Color(fcolor.r, fcolor.g, fcolor.b, 0.35), 6.0)
-		# Main faction ring
-		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 40, fcolor, 5.0)
-	match level:
-		1: _draw_circle_body(draw_color)
-		2: _draw_square_body(draw_color)
-		3: _draw_triangle_body(draw_color)
+
+	# Shot flash line (dynamic)
 	if _shot_flash_timer > 0.0:
-		var a: float = _shot_flash_timer / 0.15; var lt: Vector2 = shoot_target_pos - global_position
+		var a: float = _shot_flash_timer / 0.15
+		var lt: Vector2 = shoot_target_pos - global_position
 		draw_line(Vector2.ZERO, lt, Color(1.0, 0.3, 0.2, a), 2.0)
 		draw_circle(lt, 4.0, Color(1.0, 0.5, 0.2, a))
-	if carrying_resource == "stone": draw_circle(Vector2(0, -radius - 6), 7.0, Color(0.5, 0.52, 0.48))
-	elif carrying_resource == "fish": draw_circle(Vector2(0, -radius - 6), 7.0, Color(0.3, 0.55, 0.75))
-	# Selection ring
-	if is_selected:
-		var pulse: float = 0.6 + sin(Time.get_ticks_msec() * 0.006) * 0.4
-		draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 24, Color(1.0, 1.0, 1.0, pulse), 2.5, true)
-	# Command indicator
-	if command_mode == "hold":
-		draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.6, -radius - 28.0), "HOLD", HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color(1.0, 0.8, 0.2, 0.8))
-	elif command_mode == "move_to":
+
+	# Move command direction indicator
+	if command_mode == "move_to":
 		var cmd_dir: Vector2 = (command_target - global_position).normalized()
 		draw_line(cmd_dir * (radius + 4.0), cmd_dir * (radius + 16.0), Color(0.2, 1.0, 0.4, 0.6), 2.0)
-	elif command_mode == "break_door":
-		var cmd_dir: Vector2 = (command_target - global_position).normalized()
-		draw_line(cmd_dir * (radius + 4.0), cmd_dir * (radius + 18.0), Color(1.0, 0.4, 0.1, 0.8), 2.5)
-		draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.6, -radius - 28.0), "BREAK", HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color(1.0, 0.4, 0.1, 0.9))
-	if is_being_influenced and shift_meter > 1.0 and _brain_state == "influence":
-		var dir: Vector2 = (influence_attractor - global_position).normalized()
-		draw_line(dir * (radius + 4.0), dir * (radius + 14.0), Color(1, 1, 1, 0.35), 2.0)
-	if color_type == "red" and not is_fed:
-		draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.6, -radius - 18.0), "HUNGRY", HORIZONTAL_ALIGNMENT_CENTER, -1, 9, Color(0.9, 0.3, 0.2, 0.8))
+
+	# Shift bar
 	var shift_y := -radius - 12.0
 	if is_carrying(): shift_y -= 14.0
 	if color_type == "red" and not is_fed: shift_y -= 10.0
 	_draw_bar(-radius, shift_y, bar_w, shift_meter / 100.0, _get_shift_fill_color(next_id), Color(0.25, 0.25, 0.25, 0.5))
+
+	# Health bar
 	var hp_y := radius + 5.0
 	var hp_ratio := health / max_health if max_health > 0.0 else 1.0
 	_draw_bar(-radius, hp_y, bar_w, hp_ratio, Color(0.3, 0.8, 0.35) if hp_ratio > 0.5 else Color(0.85, 0.25, 0.2), Color(0.25, 0.25, 0.25, 0.5))
 	draw_string(ThemeDB.fallback_font, Vector2(radius + 4.0, hp_y + BAR_H), str(int(health)), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.6, 0.6, 0.6, 0.8))
+
+	# Kill count
 	if color_type == "red" and kill_count > 0:
 		draw_string(ThemeDB.fallback_font, Vector2(-radius, radius + 18.0), "K:%d" % kill_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.4, 0.3, 0.7))
+
+	# Yellow leveling bar
 	if color_type == "yellow" and leveling_meter > 0.01:
 		_draw_bar(-radius, radius + 18.0, bar_w, leveling_meter / YELLOW_LEVEL_TIME, Color(0.94, 0.84, 0.12), Color(0.25, 0.2, 0.05, 0.5))
 
-func _get_faction_border_color() -> Color:
-	if faction_id >= 0:
-		return FactionManager.get_faction_color(faction_id)
-	return Color(0.12, 0.12, 0.12)
 
-func _draw_faction_symbol() -> void:
-	if faction_id < 0 or color_type == "magic_orb":
-		return
-	var sym: String = FactionManager.get_faction_symbol(faction_id)
-	var fc: Color = FactionManager.get_faction_color(faction_id)
-	# Dark backing for readability
-	draw_circle(Vector2.ZERO, radius * 0.55, Color(0.0, 0.0, 0.0, 0.45))
-	fc.a = 1.0
-	var font_size: int = int(radius * 1.0)
-	draw_string(ThemeDB.fallback_font, Vector2(-radius * 0.45, radius * 0.38), sym,
-		HORIZONTAL_ALIGNMENT_CENTER, int(radius), font_size, fc)
-
-func _draw_circle_body(col: Color) -> void:
-	draw_circle(Vector2.ZERO, radius, col)
-	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, _get_faction_border_color(), 2.5, true)
-	_draw_faction_symbol()
-func _draw_square_body(col: Color) -> void:
-	var r := radius * 0.85
-	draw_rect(Rect2(-r, -r, r * 2, r * 2), col)
-	draw_rect(Rect2(-r, -r, r * 2, r * 2), _get_faction_border_color(), false, 2.5)
-	_draw_faction_symbol()
-func _draw_triangle_body(col: Color) -> void:
-	var r := radius; var pts := PackedVector2Array([Vector2(0, -r), Vector2(r * 0.866, r * 0.5), Vector2(-r * 0.866, r * 0.5)])
-	draw_colored_polygon(pts, col)
-	draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), _get_faction_border_color(), 2.5)
-	_draw_faction_symbol()
 func _draw_bar(x: float, y: float, w: float, ratio: float, fill: Color, track: Color) -> void:
 	draw_rect(Rect2(x, y, w, BAR_H), track)
 	if ratio > 0.001: draw_rect(Rect2(x, y, w * clampf(ratio, 0.0, 1.0), BAR_H), fill)
 	draw_rect(Rect2(x, y, w, BAR_H), Color(0.12, 0.12, 0.12, 0.6), false, 1.0)
+
 func _get_shift_fill_color(next_id: String) -> Color:
 	if next_id.is_empty(): return Color(0.5, 0.5, 0.5, 0.3)
 	return ColorRegistry.get_def(next_id).get("display_color", Color.WHITE)
@@ -835,6 +1033,12 @@ func start_death_animation() -> void:
 	_death_timer = DEATH_TWITCH_DURATION
 	_dragging = false
 	z_index = 0
+	# Hide scene nodes during death (draw code handles the twitch)
+	if _l1_body:
+		for child in [_l1_body, _l1_outline, _l2_body, _l2_outline, _l3_body, _l3_outline,
+				_faction_glow, _faction_ring, _faction_symbol, _carry_indicator,
+				_selection_ring, _command_label, _hunger_label]:
+			if child: child.visible = false
 	# Drop anything carried
 	if carrying_resource != "":
 		var dropped_type: String = carrying_resource
@@ -845,7 +1049,7 @@ func start_death_animation() -> void:
 func _die_from_lifespan() -> void:
 	## L3 villager expires from age.
 	_l3_lifespan_timer = 0.0
-	EventFeed.push("L3 %s villager expired." % color_type, Color(0.6, 0.3, 0.3))
+	EventFeed.push("%s (L3 %s) expired." % [get_display_name(), color_type], Color(0.6, 0.3, 0.3))
 	start_death_animation()
 
 

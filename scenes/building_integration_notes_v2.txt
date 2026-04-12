@@ -1,0 +1,16 @@
+House command target flow you want:
+
+1. Click House in the HUD.
+2. Click a target building.
+3. Accept the click only if:
+   - target is a HousingBuilding
+   - target.belongs_to_faction(local_faction_id)
+   - the clicked room is owned by the same faction
+   - target.is_full() is false
+4. For each selected villager:
+   - target.try_house_villager(villager)
+
+Show me these next if you want me to wire it fully:
+- main.gd or whatever handles building clicks
+- the file that knows room ownership / conquest state
+- the shop / placement code that spawns these buildings

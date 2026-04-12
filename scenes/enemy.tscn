@@ -3,10 +3,62 @@
 [ext_resource type="Script" path="res://scenes/enemy.gd" id="1_script"]
 
 [sub_resource type="CircleShape2D" id="1_shape"]
-radius = 28.0
+radius = 35.0
 
 [node name="Enemy" type="Node2D"]
 script = ExtResource("1_script")
+
+[node name="L1Body" type="Polygon2D" parent="."]
+color = Color(0.1, 0.1, 0.1, 1)
+polygon = PackedVector2Array(-35, 0, -24.7, -24.7, 0, -35, 24.7, -24.7, 35, 0, 24.7, 24.7, 0, 35, -24.7, 24.7)
+
+[node name="L1Outline" type="Line2D" parent="."]
+points = PackedVector2Array(-35, 0, -24.7, -24.7, 0, -35, 24.7, -24.7, 35, 0, 24.7, 24.7, 0, 35, -24.7, 24.7, -35, 0)
+width = 2.5
+default_color = Color(0.4, 0.08, 0.08, 1)
+
+[node name="L2Body" type="Polygon2D" parent="."]
+visible = false
+color = Color(0.1, 0.1, 0.1, 1)
+polygon = PackedVector2Array(-29.75, -29.75, 29.75, -29.75, 29.75, 29.75, -29.75, 29.75)
+
+[node name="L2Outline" type="Line2D" parent="."]
+visible = false
+points = PackedVector2Array(-29.75, -29.75, 29.75, -29.75, 29.75, 29.75, -29.75, 29.75, -29.75, -29.75)
+width = 2.5
+default_color = Color(0.4, 0.08, 0.08, 1)
+
+[node name="L3Body" type="Polygon2D" parent="."]
+visible = false
+color = Color(0.1, 0.1, 0.1, 1)
+polygon = PackedVector2Array(0, -35, 30.3, 17.5, -30.3, 17.5)
+
+[node name="L3Outline" type="Line2D" parent="."]
+visible = false
+points = PackedVector2Array(0, -35, 30.3, 17.5, -30.3, 17.5, 0, -35)
+width = 2.5
+default_color = Color(0.4, 0.08, 0.08, 1)
+
+[node name="EyeLeft" type="Polygon2D" parent="."]
+position = Vector2(-8, -6)
+color = Color(0.8, 0.15, 0.1, 1)
+polygon = PackedVector2Array(-4, 0, -2.8, -2.8, 0, -4, 2.8, -2.8, 4, 0, 2.8, 2.8, 0, 4, -2.8, 2.8)
+
+[node name="EyeRight" type="Polygon2D" parent="."]
+position = Vector2(8, -6)
+color = Color(0.8, 0.15, 0.1, 1)
+polygon = PackedVector2Array(-4, 0, -2.8, -2.8, 0, -4, 2.8, -2.8, 4, 0, 2.8, 2.8, 0, 4, -2.8, 2.8)
+
+[node name="LevelLabel" type="Label" parent="."]
+visible = false
+offset_left = -35.0
+offset_top = 40.0
+offset_right = 35.0
+offset_bottom = 56.0
+mouse_filter = 2
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.7, 0.2, 0.2, 0.8)
 
 [node name="InputArea" type="Area2D" parent="."]
 input_pickable = true

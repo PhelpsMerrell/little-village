@@ -17,7 +17,7 @@ func _ready() -> void:
 	register_faction(LOCAL_FACTION_ID, "Player", Color(1, 1, 1))
 
 
-func register_faction(id: int, faction_name: String, faction_color: Color) -> void:
+func register_faction(id: int, faction_name: String, faction_color: Color, is_ai: bool = false) -> void:
 	factions[id] = {
 		"id": id,
 		"name": faction_name,
@@ -25,6 +25,7 @@ func register_faction(id: int, faction_name: String, faction_color: Color) -> vo
 		"player_ids": [],
 		"eliminated": false,
 		"core_room_id": -1,
+		"is_ai": is_ai,
 	}
 
 
@@ -80,6 +81,10 @@ func get_effective_max_pop(faction_id: int, rooms_controlled: int, total_claimab
 	var min_floor: int = maxi(3, int(floor(float(max_population) * 0.05)))
 	var scaled: int = int(floor(float(rooms_controlled) / float(total_claimable) * float(max_population)))
 	return clampi(scaled, min_floor, max_population)
+
+
+func is_ai_faction(faction_id: int) -> bool:
+	return factions.get(faction_id, {}).get("is_ai", false)
 
 
 func clear() -> void:
