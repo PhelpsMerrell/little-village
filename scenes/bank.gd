@@ -9,18 +9,19 @@ func _ready() -> void:
 
 
 func accepts_villager(v: Node) -> bool:
-	## Override: bank accepts both stone and diamond.
+	## Override: bank accepts stone, diamond, and grain.
+	## Preplaced (-2) banks accept ANY faction.
 	if v == null or not is_instance_valid(v):
 		return false
-	if placed_by_faction < 0:
+	if placed_by_faction == -1:
 		return false
 	if not "faction_id" in v:
 		return false
-	if int(v.faction_id) != placed_by_faction:
-		return false
 	if not "carrying_resource" in v:
 		return false
-	return str(v.carrying_resource) in ["stone", "diamond"]
+	if placed_by_faction >= 0 and int(v.faction_id) != placed_by_faction:
+		return false
+	return str(v.carrying_resource) in ["stone", "diamond", "grain"]
 
 
 func try_deposit(v: Node) -> bool:
@@ -38,6 +39,8 @@ func try_deposit(v: Node) -> bool:
 func _on_deposit_typed(fid: int, amount: int, res_type: String) -> void:
 	if res_type == "diamond":
 		Economy.add_diamonds(amount, fid)
+	elif res_type == "grain":
+		Economy.add_grain(amount, fid)
 	else:
 		Economy.add_stone(amount, fid)
 

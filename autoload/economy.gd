@@ -23,11 +23,13 @@ func _ready() -> void:
 	register_shop_item("fishing_hut", 7, "Fishing Hut", "Blues deposit fish here")
 	register_shop_item("bank", 7, "Bank", "Yellows deposit stone here")
 	register_shop_item("church", 10, "Church", "Blues heal / 8 shelter at night")
+	register_shop_item("university", 12, "University", "Train reds +1% fire rate/night / 6 shelter")
+	register_shop_item("farm", 8, "Farm", "Produces grain / 8 shelter at night")
 
 
 func _ensure_faction(fid: int) -> void:
 	if not _faction_resources.has(fid):
-		_faction_resources[fid] = {"stone": 0, "fish": 0, "diamonds": 0}
+		_faction_resources[fid] = {"stone": 0, "fish": 0, "diamonds": 0, "grain": 0}
 
 
 func get_stone(fid: int) -> int:
@@ -98,6 +100,25 @@ func add_diamonds(amount: int = 1, fid: int = -1) -> void:
 		fid = FactionManager.local_faction_id
 	_ensure_faction(fid)
 	_faction_resources[fid]["diamonds"] += amount
+	currency_changed.emit()
+
+
+func get_grain(fid: int) -> int:
+	_ensure_faction(fid)
+	return int(_faction_resources[fid]["grain"])
+
+
+func set_grain(fid: int, amount: int) -> void:
+	_ensure_faction(fid)
+	_faction_resources[fid]["grain"] = amount
+	currency_changed.emit()
+
+
+func add_grain(amount: int = 1, fid: int = -1) -> void:
+	if fid < 0:
+		fid = FactionManager.local_faction_id
+	_ensure_faction(fid)
+	_faction_resources[fid]["grain"] += amount
 	currency_changed.emit()
 
 

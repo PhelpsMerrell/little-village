@@ -1,0 +1,80 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/town_hall.gd" id="1_script"]
+
+[sub_resource type="CircleShape2D" id="1_shape"]
+radius = 90.0
+
+[node name="TownHall" type="Node2D"]
+script = ExtResource("1_script")
+
+[node name="Foundation" type="Polygon2D" parent="."]
+color = Color(0.28, 0.22, 0.16, 1)
+polygon = PackedVector2Array(-56, -20, 56, -20, 56, 56, -56, 56)
+
+[node name="FoundationOutline" type="Line2D" parent="."]
+points = PackedVector2Array(-56, -20, 56, -20, 56, 56, -56, 56, -56, -20)
+width = 3.0
+default_color = Color(0.4, 0.3, 0.18, 1)
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.58, 0.45, 0.3, 1)
+polygon = PackedVector2Array(-48, -16, 48, -16, 48, 48, -48, 48)
+
+[node name="BodyOutline" type="Line2D" parent="."]
+points = PackedVector2Array(-48, -16, 48, -16, 48, 48, -48, 48, -48, -16)
+width = 2.5
+default_color = Color(0.35, 0.24, 0.14, 1)
+
+[node name="Roof" type="Polygon2D" parent="."]
+color = Color(0.5, 0.15, 0.1, 1)
+polygon = PackedVector2Array(0, -58, 56, -16, -56, -16)
+
+[node name="RoofOutline" type="Line2D" parent="."]
+points = PackedVector2Array(0, -58, 56, -16, -56, -16, 0, -58)
+width = 2.5
+default_color = Color(0.32, 0.1, 0.06, 1)
+
+[node name="Spire" type="Polygon2D" parent="."]
+color = Color(0.65, 0.55, 0.2, 1)
+polygon = PackedVector2Array(-3, -72, 3, -72, 3, -58, -3, -58)
+
+[node name="Door" type="Polygon2D" parent="."]
+color = Color(0.3, 0.2, 0.1, 1)
+polygon = PackedVector2Array(-12, 10, 12, 10, 12, 48, -12, 48)
+
+[node name="LeftWindow" type="Polygon2D" parent="."]
+color = Color(0.35, 0.5, 0.65, 0.6)
+polygon = PackedVector2Array(-36, -4, -22, -4, -22, 8, -36, 8)
+
+[node name="RightWindow" type="Polygon2D" parent="."]
+color = Color(0.35, 0.5, 0.65, 0.6)
+polygon = PackedVector2Array(22, -4, 36, -4, 36, 8, 22, 8)
+
+[node name="BannerLabel" type="Label" parent="."]
+offset_left = -30.0
+offset_top = -50.0
+offset_right = 30.0
+offset_bottom = -36.0
+mouse_filter = 2
+text = "TOWN HALL"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.9, 0.8, 0.5, 0.9)
+
+[node name="CountLabel" type="Label" parent="."]
+offset_left = -20.0
+offset_top = 56.0
+offset_right = 20.0
+offset_bottom = 72.0
+mouse_filter = 2
+text = "0/8"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.8, 0.8, 0.7, 1)
+
+[node name="InputArea" type="Area2D" parent="."]
+input_pickable = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="InputArea"]
+shape = SubResource("1_shape")

@@ -41,9 +41,19 @@ func get_blocked_rects_for(color_id: String) -> Array:
 	return rects
 
 
+var _prev_owner_fid: int = -99
+var _prev_capture_ratio: float = -1.0
+
+
 func _process(_delta: float) -> void:
-	_update_ownership_visuals()
-	queue_redraw()
+	var owner_fid: int = RoomOwnership.get_room_owner(room_id)
+	var cap_ratio: float = RoomOwnership.get_capture_progress_ratio(room_id)
+	var changed: bool = (owner_fid != _prev_owner_fid or absf(cap_ratio - _prev_capture_ratio) > 0.005)
+	if changed:
+		_prev_owner_fid = owner_fid
+		_prev_capture_ratio = cap_ratio
+		_update_ownership_visuals()
+		queue_redraw()
 
 
 func _update_ownership_visuals() -> void:

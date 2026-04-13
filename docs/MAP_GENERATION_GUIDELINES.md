@@ -15,11 +15,13 @@ The map is a grid of cells. Each cell is `CELL = 675px` wide/tall with `MAP_GAP 
 ### Grid Dimensions by Size and Faction Count
 
 | Factions | Small | Medium | Large | XL |
-|----------|-------|--------|-------|----|
-| 1 | 6×4 | 8×6 | 10×7 | 14×10 |
-| 2 | 7×5 | 9×6 | 11×8 | 14×11 |
-| 4 | 8×6 | 10×7 | 12×9 | 15×11 |
-| 8 | 10×7 | 12×8 | 14×10 | 16×12 |
+|----------|-------|--------|-------|----|  
+| 1 | 16×12 | 24×16 | 28×20 | 28×20 |
+| 2 | 18×14 | 26×18 | 30×22 | 28×22 |
+| 4 | 20×16 | 28×20 | 32×24 | 30×22 |
+| 8 | 24×18 | 32×22 | 36×26 | 32×24 |
+
+Note: Tutorial and sandbox maps use hardcoded grid sizes and are not affected by these dimensions.
 
 ---
 
@@ -30,12 +32,12 @@ generate(seed, faction_count, map_size):
   1. _setup_grid_size()         — choose grid dims from table above
   2. _init_grid()               — fill all cells with -1 (empty)
   3. _place_faction_clusters()  — place core+stone+river per faction on perimeter
-  4. _connect_faction_clusters() — carve backbone paths between factions (NEW)
+  4. _connect_faction_clusters() — carve backbone paths between factions
   5. _fill_neutral_rooms()      — 3-pass organic island generation
-  6. _build_room_defs_array()   — convert internal map to ROOM_DEFS
-  7. _generate_rooms()          — instantiate Room nodes
-  8. _generate_walls()          — instantiate Wall/Door nodes between rooms
-  9. _generate_entities()       — populate neutral rooms with resources/enemies
+  6. _assign_portal_pair()      — pick two maximally-distant rooms as portal pair
+  7. _build_room_defs_array()   — convert internal map to ROOM_DEFS
+  8. _generate_rooms()          — instantiate Room nodes
+  9. _generate_entities()       — populate neutral rooms with resources/enemies/portals
   10. _generate_faction_starts() — spawn starting villagers/banks/huts per faction
   11. _print_debug_summary()    — ASCII grid + connectivity check
 ```
@@ -121,6 +123,20 @@ Target counts: ~1/6 rivers, ~1/4 quarries, ~1/8 enemy dens (of total neutral roo
 | `colorless_camp` | Wanderer Camp | 6–10 colorless villagers |
 | `enemy_den` | Enemy Den | 2–3 enemies |
 | `contested` | Contested | 1–2 enemies + 4–8 stones |
+| `diamond_cave` | Diamond Cave | 1–3 enemies + 4–8 diamonds |
+| `portal` | Portal | Portal vortex — teleports to partner portal room |
+
+---
+
+## Portal System
+
+Each game map (not tutorial/sandbox) spawns exactly one portal pair — two rooms maximally distant from each other, retyped to `portal`. A swirling vortex visual entity is placed at each portal room's center.
+
+**Teleportation**: Any villager or enemy entering within `PORTAL_TELEPORT_RADIUS = 80px` of a portal is instantly moved to the partner portal with a random offset. A `PORTAL_COOLDOWN = 1.5s` prevents re-entry loops.
+
+**Selection**: `_assign_portal_pair()` runs after room type assignment. It collects all non-faction, non-river, non-diamond neutral rooms, then picks the pair with the greatest Manhattan distance between room centers.
+
+**Data**: `portal_pairs: Dictionary` (room_id → partner_room_id, bidirectional) is exposed on the map generator and copied to `main.gd._portal_pairs` after generation.
 
 ---
 

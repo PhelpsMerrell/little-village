@@ -17,10 +17,10 @@ const DOOR_SIZE := 120.0
 # size_index: 0=small, 1=medium, 2=large, 3=xl
 const SIZE_NAMES := ["small", "medium", "large", "xl"]
 const GRID_CONFIG := {
-	1: [[8, 6], [12, 8], [14, 10], [14, 10]],
-	2: [[9, 7], [13, 9], [15, 11], [14, 11]],
-	4: [[10, 8], [14, 10], [16, 12], [15, 11]],
-	8: [[12, 9], [16, 11], [18, 13], [16, 12]],
+	1: [[16, 12], [24, 16], [28, 20], [28, 20]],
+	2: [[18, 14], [26, 18], [30, 22], [28, 22]],
+	4: [[20, 16], [28, 20], [32, 24], [30, 22]],
+	8: [[24, 18], [32, 22], [36, 26], [32, 24]],
 }
 
 # Room types
@@ -34,6 +34,7 @@ const RT_COLORLESS_CAMP    := "colorless_camp"
 const RT_ENEMY_DEN         := "enemy_den"
 const RT_CONTESTED         := "contested"
 const RT_DIAMOND           := "diamond_cave"
+const RT_PORTAL            := "portal"
 
 # Room type colors
 const ROOM_COLORS := {
@@ -47,6 +48,7 @@ const ROOM_COLORS := {
 	RT_ENEMY_DEN:         Color(0.12, 0.08, 0.08, 0.35),
 	RT_CONTESTED:         Color(0.10, 0.16, 0.20, 0.35),
 	RT_DIAMOND:           Color(0.12, 0.18, 0.22, 0.35),
+	RT_PORTAL:            Color(0.22, 0.08, 0.28, 0.35),
 }
 
 # Room type labels
@@ -61,6 +63,7 @@ const ROOM_LABELS := {
 	RT_ENEMY_DEN:         "Enemy Den",
 	RT_CONTESTED:         "Contested",
 	RT_DIAMOND:           "Diamond Cave",
+	RT_PORTAL:            "Portal",
 }
 
 # Cluster direction: which way does the chain extend from faction spawn
@@ -74,6 +77,76 @@ const FOOTPRINTS := [
 	[2, 1], [1, 2],
 	[1, 1],
 ]
+
+## Loaded room template cell patterns: Array of {cells: Array[Vector2i], name: String}
+var _room_templates: Array = []
+
+
+func _load_room_templates() -> void:
+	## Load room template scenes from res://scenes/room_templates/ and extract cell patterns.
+	_room_templates.clear()
+	var template_paths: Array = [
+		"res://scenes/room_templates/plus_shape.tscn",
+		"res://scenes/room_templates/t_shape.tscn",
+		"res://scenes/room_templates/l_shape.tscn",
+		"res://scenes/room_templates/reverse_l_shape.tscn",
+		"res://scenes/room_templates/big_square.tscn",
+		"res://scenes/room_templates/horizontal_bar.tscn",
+		"res://scenes/room_templates/vertical_bar.tscn",
+		"res://scenes/room_templates/single_square.tscn",
+	]
+	for path in template_paths:
+		if not ResourceLoader.exists(path):
+			continue
+		var scene: PackedScene = load(path)
+		if scene == null:
+			continue
+		var inst = scene.instantiate()
+		if inst == null or not inst.has_method("get_cells"):
+			if inst:
+				inst.queue_free()
+			continue
+		var cells: Array = inst.get_cells()
+		var tname: String = inst.name
+		inst.queue_free()
+		if cells.size() > 0:
+			_room_templates.append({"cells": cells, "name": tname})
+	# Sort by cell count descending (largest templates placed first)
+	_room_templates.sort_custom(func(a, b): return a["cells"].size() > b["cells"].size())
+
+
+func _can_place_cells(anchor: Vector2i, cells: Array) -> bool:
+	## True if all cells of this template are in the island mask and free.
+	for offset in cells:
+		var cell := anchor + offset
+		if not _island_mask.has(cell):
+			return false
+		if not _grid.has(cell):
+			return false
+		if _grid[cell] != -1:
+			return false
+	return true
+
+
+func _mark_grid_cells(anchor: Vector2i, cells: Array, room_id: int) -> void:
+	## Mark all cells of a template as belonging to room_id.
+	for offset in cells:
+		var cell := anchor + offset
+		if _grid.has(cell):
+			_grid[cell] = room_id
+
+
+func _cells_bounding_box(cells: Array) -> Dictionary:
+	## Returns {min_offset: Vector2i, cw: int, ch: int} for a set of cell offsets.
+	var min_c := Vector2i(999, 999)
+	var max_c := Vector2i(-999, -999)
+	for c in cells:
+		min_c.x = mini(min_c.x, c.x)
+		min_c.y = mini(min_c.y, c.y)
+		max_c.x = maxi(max_c.x, c.x)
+		max_c.y = maxi(max_c.y, c.y)
+	return {"min_offset": min_c, "cw": max_c.x - min_c.x + 1, "ch": max_c.y - min_c.y + 1}
+
 
 ## Generated room definitions — parallel to old ROOM_DEFS format:
 ## [id, col, row, cells_w, cells_h, label, color]
@@ -100,6 +173,9 @@ var _faction_spawn_cells: Array = [] # Vector2i per faction
 var _door_restrictions: Dictionary = {}
 var _river_room_ids: Array = []      # for main.gd river fish production
 var _map_size_index: int = 1         # 0=small 1=medium 2=large 3=xl
+
+## Portal pairs: room_id -> partner_room_id (bidirectional)
+var portal_pairs: Dictionary = {}
 
 
 var _faction_id_map: Array = []  ## maps faction array index -> actual faction ID
@@ -190,7 +266,12 @@ func generate_tutorial(containers: Dictionary, scenes: Dictionary) -> void:
 	var a_size: Vector2 = room_pixel_size(2, 2)
 	var a_center: Vector2 = a_pos + a_size * 0.5
 
-	# Magic orb (center)
+	# Town Hall at center with magic orb inside
+	if scenes.has("town_hall") and containers.has("town_halls"):
+		var th = scenes["town_hall"].instantiate()
+		containers["town_halls"].add_child(th)
+		th.global_position = a_center
+		th.placed_by_faction = 0
 	var orb = scenes["villager"].instantiate()
 	containers["villagers"].add_child(orb)
 	orb.setup("magic_orb", a_center)
@@ -364,10 +445,16 @@ func generate_sandbox(containers: Dictionary, scenes: Dictionary) -> void:
 	var a_pos: Vector2 = room_pixel_pos(0, 0)
 	var a_size: Vector2 = room_pixel_size(3, 2)
 
-	# Magic orb — safe top-left corner
+	# Town Hall with magic orb inside — safe top-left corner
+	var orb_pos := Vector2(a_pos.x + 120, a_pos.y + 120)
+	if scenes.has("town_hall") and containers.has("town_halls"):
+		var th = scenes["town_hall"].instantiate()
+		containers["town_halls"].add_child(th)
+		th.global_position = orb_pos
+		th.placed_by_faction = 0
 	var orb = scenes["villager"].instantiate()
 	containers["villagers"].add_child(orb)
-	orb.setup("magic_orb", Vector2(a_pos.x + 120, a_pos.y + 120))
+	orb.setup("magic_orb", orb_pos)
 	orb.faction_id = 0
 
 	# Red villager — top-right area
@@ -483,9 +570,11 @@ func generate(containers: Dictionary, scenes: Dictionary, map_seed: int = -1,
 
 	_setup_grid_size(map_size)
 	_init_grid()
+	_load_room_templates()
 	_place_faction_clusters()
 	_connect_faction_clusters()   ## Ensures single connected landmass
 	_fill_neutral_rooms()
+	_assign_portal_pair()
 	_build_room_defs_array()
 	_generate_rooms(containers["rooms"], scenes["room"])
 	# Walls/doors omitted in main game — open map layout.
@@ -545,6 +634,7 @@ func _place_faction_clusters() -> void:
 	FACTION_STARTS.clear()
 	_door_restrictions.clear()
 	_river_room_ids.clear()
+	portal_pairs.clear()
 	_next_room_id = 0
 
 	var perimeter: Array = _get_perimeter_cells()
@@ -911,34 +1001,14 @@ func _is_island_connected() -> bool:
 # ------------------------------------------------------------------------------
 
 func _place_footprints() -> void:
-	## Try to place varied room footprints (largest first) inside island mask.
-	## Cells already occupied by faction rooms are skipped.
-	## Any remaining single mask cells become 1×1 rooms.
+	## Place varied room footprints inside island mask.
+	## Uses loaded room templates when available, falls back to FOOTPRINTS.
+	## Largest templates placed first. Remaining cells become 1×1 rooms.
 
-	# Build list of free mask cells (not yet assigned a room)
-	# We'll try footprints in order: largest first
-	for fp in FOOTPRINTS:
-		var cw: int = fp[0]
-		var ch: int = fp[1]
-		if cw == 1 and ch == 1:
-			break  # 1×1 cleanup handled separately below
-
-		# Collect candidate anchor cells for this footprint (shuffled)
-		var candidates: Array = _get_free_mask_cells()
-		_rng_shuffle(candidates)
-
-		for anchor in candidates:
-			if not _can_place_footprint(anchor, cw, ch):
-				continue
-			# Place this footprint
-			var rid: int = _next_room_id
-			_next_room_id += 1
-			_mark_grid(anchor, cw, ch, rid)
-			_room_defs_map[rid] = {
-				"id": rid, "col": anchor.x, "row": anchor.y,
-				"cw": cw, "ch": ch, "label": "Room",
-				"color": Color(0.14, 0.14, 0.14, 0.35), "type": RT_PASSAGE, "faction": -1,
-			}
+	if _room_templates.size() > 0:
+		_place_footprints_from_templates()
+	else:
+		_place_footprints_rectangular()
 
 	# 1×1 cleanup: any remaining free mask cell becomes a 1×1 room
 	for cell in _get_free_mask_cells():
@@ -950,6 +1020,55 @@ func _place_footprints() -> void:
 			"cw": 1, "ch": 1, "label": "Room",
 			"color": Color(0.14, 0.14, 0.14, 0.35), "type": RT_PASSAGE, "faction": -1,
 		}
+
+
+func _place_footprints_from_templates() -> void:
+	## Place rooms using loaded scene-based templates (supports non-rectangular shapes).
+	for tmpl in _room_templates:
+		var cells: Array = tmpl["cells"]
+		if cells.size() <= 1:
+			continue  # Skip single-cell templates (handled by 1×1 cleanup)
+
+		var candidates: Array = _get_free_mask_cells()
+		_rng_shuffle(candidates)
+
+		for anchor in candidates:
+			if not _can_place_cells(anchor, cells):
+				continue
+			var rid: int = _next_room_id
+			_next_room_id += 1
+			_mark_grid_cells(anchor, cells, rid)
+			var bbox: Dictionary = _cells_bounding_box(cells)
+			_room_defs_map[rid] = {
+				"id": rid, "col": anchor.x + bbox["min_offset"].x,
+				"row": anchor.y + bbox["min_offset"].y,
+				"cw": bbox["cw"], "ch": bbox["ch"], "label": "Room",
+				"color": Color(0.14, 0.14, 0.14, 0.35), "type": RT_PASSAGE, "faction": -1,
+			}
+
+
+func _place_footprints_rectangular() -> void:
+	## Fallback: place rooms using hardcoded rectangular FOOTPRINTS.
+	for fp in FOOTPRINTS:
+		var cw: int = fp[0]
+		var ch: int = fp[1]
+		if cw == 1 and ch == 1:
+			break
+
+		var candidates: Array = _get_free_mask_cells()
+		_rng_shuffle(candidates)
+
+		for anchor in candidates:
+			if not _can_place_footprint(anchor, cw, ch):
+				continue
+			var rid: int = _next_room_id
+			_next_room_id += 1
+			_mark_grid(anchor, cw, ch, rid)
+			_room_defs_map[rid] = {
+				"id": rid, "col": anchor.x, "row": anchor.y,
+				"cw": cw, "ch": ch, "label": "Room",
+				"color": Color(0.14, 0.14, 0.14, 0.35), "type": RT_PASSAGE, "faction": -1,
+			}
 
 
 func _get_free_mask_cells() -> Array:
@@ -1082,6 +1201,61 @@ func _choose_room_type(dist: int, cw: int, ch: int,
 	if roll < 0.72:
 		return RT_CONTESTED
 	return RT_PASSAGE
+
+
+# ------------------------------------------------------------------------------
+# Portal pair assignment
+# ------------------------------------------------------------------------------
+
+func _assign_portal_pair() -> void:
+	## Pick two far-apart neutral rooms and retype them as portal pairs.
+	var faction_room_ids: Dictionary = {}
+	for fs in FACTION_STARTS:
+		faction_room_ids[fs["home_room"]] = true
+		faction_room_ids[fs["bank_room"]] = true
+		faction_room_ids[fs["river_room"]] = true
+
+	var candidates: Array = []
+	for rid in _room_defs_map:
+		if faction_room_ids.has(rid):
+			continue
+		var rd: Dictionary = _room_defs_map[rid]
+		var rtype: String = rd["type"]
+		if rtype == RT_RIVER or rtype == RT_DIAMOND:
+			continue
+		candidates.append(rid)
+
+	if candidates.size() < 2:
+		return
+
+	# Find the pair with maximum Manhattan distance between room centers
+	var best_a: int = -1
+	var best_b: int = -1
+	var best_dist: int = -1
+	for i in candidates.size():
+		var ra: Dictionary = _room_defs_map[candidates[i]]
+		var ca := Vector2i(ra["col"] + ra["cw"] / 2, ra["row"] + ra["ch"] / 2)
+		for j in range(i + 1, candidates.size()):
+			var rb: Dictionary = _room_defs_map[candidates[j]]
+			var cb := Vector2i(rb["col"] + rb["cw"] / 2, rb["row"] + rb["ch"] / 2)
+			var d: int = absi(ca.x - cb.x) + absi(ca.y - cb.y)
+			if d > best_dist:
+				best_dist = d
+				best_a = candidates[i]
+				best_b = candidates[j]
+
+	if best_a < 0 or best_b < 0:
+		return
+
+	for rid in [best_a, best_b]:
+		var rd: Dictionary = _room_defs_map[rid]
+		rd["type"] = RT_PORTAL
+		rd["label"] = ROOM_LABELS[RT_PORTAL]
+		rd["color"] = ROOM_COLORS[RT_PORTAL]
+
+	portal_pairs[best_a] = best_b
+	portal_pairs[best_b] = best_a
+	print("Portal pair: room %d <-> room %d (distance %d)" % [best_a, best_b, best_dist])
 
 
 # ==============================================================================
@@ -1286,6 +1460,15 @@ func _generate_entities(containers: Dictionary, scenes: Dictionary) -> void:
 				for i in _rng.randi_range(4, 8):
 					_spawn_diamond(containers, scenes, rpos, rsize)
 
+			RT_PORTAL:
+				# Portal visual entity — spawned at room center
+				if scenes.has("portal"):
+					var p = scenes["portal"].instantiate()
+					containers["portals"].add_child(p)
+					p.global_position = center
+					p.room_id = rid
+					p.partner_room_id = portal_pairs.get(rid, -1)
+
 			RT_STONE:
 				var bank = scenes["bank"].instantiate()
 				containers["banks"].add_child(bank)
@@ -1388,6 +1571,12 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 				v.is_fed = true
 
 		if not is_survival:
+			# Place Town Hall at orb position — orb starts inside
+			if scenes.has("town_hall") and containers.has("town_halls"):
+				var th = scenes["town_hall"].instantiate()
+				containers["town_halls"].add_child(th)
+				th.global_position = orb_pos
+				th.placed_by_faction = _faction_id_map[fi]
 			var orb = scenes["villager"].instantiate()
 			containers["villagers"].add_child(orb)
 			orb.setup("magic_orb", orb_pos)
@@ -1498,6 +1687,7 @@ func _print_debug_summary() -> void:
 					RT_QUARRY:   line += "Q"
 					RT_ENEMY_DEN: line += "E"
 					RT_DIAMOND: line += "D"
+					RT_PORTAL: line += "P"
 					RT_COLORLESS_CAMP: line += "W"
 					RT_COLORLESS_PASSAGE: line += "w"
 					RT_CONTESTED: line += "X"
@@ -1505,7 +1695,7 @@ func _print_debug_summary() -> void:
 			else:
 				line += "~"
 		lines.append(line)
-	print("Layout (C=Core S=Stone R=River Q=Quarry E=Enemy D=Diamond W=WandererCamp w=path X=Contested .=Passage ~=Water):")
+	print("Layout (C=Core S=Stone R=River Q=Quarry E=Enemy D=Diamond P=Portal W=WandererCamp w=path X=Contested .=Passage ~=Water):")
 	for line in lines:
 		print("  " + line)
 	print("=====================")

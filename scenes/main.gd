@@ -15,8 +15,8 @@ const YELLOW_PAIR_DIST := 100.0
 const HOME_SHELTER_DIST := 80.0
 const CHURCH_INTAKE_RADIUS := 70.0
 const RED_STARVE_DPS := 2.0
-const DEMON_SPAWN_COUNT := 7
-const ZOMBIE_SPAWN_COUNT := 5
+const DEMON_SPAWN_COUNT := 14
+const ZOMBIE_SPAWN_COUNT := 10
 
 const RIVER_FISH_MAX := 4
 const RIVER_FISH_INTERVAL := 1800.0
@@ -26,6 +26,8 @@ const ROOM_RESPAWN_MAX_STONE := 8    ## max stones per stone room
 const ROOM_RESPAWN_MAX_FISH := 4     ## max fish per river room
 
 var _river_room_ids: Array = []  ## populated after map generation
+var _portal_pairs: Dictionary = {}  ## room_id -> partner_room_id
+var _portals: Array = []  ## portal node references
 
 var _river_fish_timer: float = 0.0
 var _room_respawn_timer: float = 0.0
@@ -46,8 +48,19 @@ var homes: Array = []
 var banks: Array = []
 var fishing_huts: Array = []
 var churches: Array = []
+var universities: Array = []
+var farms: Array = []
+var town_halls: Array = []
 
 var _player: Node = null  ## PlayerController instance
+
+## Spatial room lookup grid: cell_key (int) -> room_id
+var _room_grid: Dictionary = {}
+var _room_grid_cell_size: float = 64.0  ## Pixels per grid cell
+
+## Staggered brain update
+var _brain_batch_index: int = 0
+const BRAIN_BATCH_SIZE := 32  ## Max villagers to update brain context per frame
 
 var room_villagers: Dictionary = {}
 var room_enemies: Dictionary = {}
@@ -62,6 +75,10 @@ var room_enemies: Dictionary = {}
 @onready var _banks_container: Node2D = $Banks
 @onready var _huts_container: Node2D = $FishingHuts
 @onready var _churches_container: Node2D = _get_or_create_container("Churches")
+@onready var _portals_container: Node2D = _get_or_create_container("Portals")
+@onready var _universities_container: Node2D = _get_or_create_container("Universities")
+@onready var _farms_container: Node2D = _get_or_create_container("Farms")
+@onready var _town_halls_container: Node2D = _get_or_create_container("TownHalls")
 @onready var _fog_overlay: Node2D = $FogOverlay
 @onready var _camera: Camera2D = $Camera
 @onready var _hud: Control = $UI/HUD
@@ -72,6 +89,9 @@ var _demon_scene: PackedScene = preload("res://scenes/demon.tscn")
 var _zombie_scene: PackedScene = preload("res://scenes/zombie.tscn")
 var _home_scene: PackedScene = preload("res://scenes/home.tscn")
 var _church_scene: PackedScene = preload("res://scenes/church.tscn")
+var _university_scene: PackedScene = preload("res://scenes/university.tscn")
+var _farm_scene: PackedScene = preload("res://scenes/farm.tscn")
+var _town_hall_scene: PackedScene = preload("res://scenes/town_hall.tscn")
 var _collectable_scene: PackedScene = preload("res://scenes/collectable.tscn")
 var _fish_scene: PackedScene = preload("res://scenes/fish_spot.tscn")
 var _room_scene: PackedScene = preload("res://scenes/room.tscn")
@@ -224,6 +244,8 @@ func _generate_map() -> void:
 		"homes": _homes_container,
 		"banks": _banks_container,
 		"huts": _huts_container,
+		"portals": _portals_container,
+		"town_halls": _town_halls_container,
 	}
 	var scenes := {
 		"villager": _villager_scene,
@@ -235,6 +257,8 @@ func _generate_map() -> void:
 		"bank": preload("res://scenes/bank.tscn"),
 		"hut": preload("res://scenes/fishing_hut.tscn"),
 		"river": preload("res://scenes/obstacles/river_obstacle.tscn"),
+		"portal": preload("res://scenes/portal.tscn"),
+		"town_hall": _town_hall_scene,
 	}
 	if TutorialManager.active:
 		_map_gen.generate_tutorial(containers, scenes)
@@ -243,6 +267,7 @@ func _generate_map() -> void:
 				FactionManager.get_all_faction_ids())
 	room_map = _map_gen.room_map
 	_river_room_ids = _map_gen._river_room_ids.duplicate()
+	_portal_pairs = _map_gen.portal_pairs.duplicate()
 
 	# Register core rooms using actual faction IDs from the map
 	for fi in _map_gen.FACTION_STARTS.size():
@@ -374,6 +399,7 @@ func _collect_all() -> void:
 	_collect_walls()
 	_collect_villagers()
 	_collect_enemies()
+	_build_room_grid()
 
 	collectables.clear()
 	for c in _collectables_container.get_children():
@@ -398,6 +424,22 @@ func _collect_all() -> void:
 	churches.clear()
 	for c in _churches_container.get_children():
 		churches.append(c)
+
+	_portals.clear()
+	for p in _portals_container.get_children():
+		_portals.append(p)
+
+	universities.clear()
+	for u in _universities_container.get_children():
+		universities.append(u)
+
+	farms.clear()
+	for f in _farms_container.get_children():
+		farms.append(f)
+
+	town_halls.clear()
+	for th in _town_halls_container.get_children():
+		town_halls.append(th)
 
 
 func _collect_rooms() -> void:
@@ -481,6 +523,8 @@ func _process(delta: float) -> void:
 	_process_home_sheltering()
 	_process_river_fish(delta)
 	_process_room_respawns(delta)
+	_process_portals()
+	_process_farm_grain(delta)
 
 	# AI opponents
 	for ai in _ai_controllers:
@@ -735,6 +779,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	all_buildings.append_array(churches)
 	all_buildings.append_array(banks)
 	all_buildings.append_array(fishing_huts)
+	all_buildings.append_array(town_halls)
 
 	var clicked_building: Node = _get_clicked_building(click_pos, all_buildings)
 	if clicked_building:
@@ -832,6 +877,20 @@ func _place_building(item_id: String, pos: Vector2) -> void:
 		h.placed_by_faction = fid
 		fishing_huts.append(h)
 		EventFeed.push("Fishing Hut built.", Color(0.6, 0.75, 0.9))
+	elif item_id == "university":
+		var u = _university_scene.instantiate()
+		_universities_container.add_child(u)
+		u.global_position = pos
+		u.placed_by_faction = fid
+		universities.append(u)
+		EventFeed.push("University built.", Color(0.9, 0.7, 0.3))
+	elif item_id == "farm":
+		var f = _farm_scene.instantiate()
+		_farms_container.add_child(f)
+		f.global_position = pos
+		f.placed_by_faction = fid
+		farms.append(f)
+		EventFeed.push("Farm built.", Color(0.7, 0.8, 0.3))
 
 
 func _on_building_placed_remote(item_id: String, px: float, py: float) -> void:
@@ -875,6 +934,10 @@ func _on_hud_building_command(cmd_type: String) -> void:
 				item_id = "bank"
 			elif building in fishing_huts:
 				item_id = "fishing_hut"
+			elif building in universities:
+				item_id = "university"
+			elif building in farms:
+				item_id = "farm"
 			var sell_val: int = Economy.get_sell_value(item_id)
 			Economy.add_stone(sell_val, FactionManager.local_faction_id)
 			if building in homes:
@@ -885,6 +948,10 @@ func _on_hud_building_command(cmd_type: String) -> void:
 				banks.erase(building)
 			if building in fishing_huts:
 				fishing_huts.erase(building)
+			if building in universities:
+				universities.erase(building)
+			if building in farms:
+				farms.erase(building)
 			_player.deselect_building()
 			_hud.set_building_menu_visible(false)
 			building.queue_free()
@@ -958,7 +1025,7 @@ func _eliminate_faction(eliminated_fid: int, captor_fid: int) -> void:
 			v.faction_id = captor_fid
 
 	# Transfer all buildings placed by eliminated faction
-	for b in homes + churches + banks + fishing_huts:
+	for b in homes + churches + banks + fishing_huts + town_halls:
 		if not is_instance_valid(b):
 			continue
 		if b.placed_by_faction == eliminated_fid:
@@ -1036,7 +1103,7 @@ func _apply_net_command(cmd: Dictionary) -> void:
 		"house_target":
 			var bpos := Vector2(float(cmd.get("bx", 0.0)), float(cmd.get("by", 0.0)))
 			var target_building: Node = null
-			for b in homes + churches:
+			for b in homes + churches + town_halls:
 				if is_instance_valid(b) and b.global_position.distance_to(bpos) < 60.0:
 					target_building = b
 					break
@@ -1117,7 +1184,7 @@ func _apply_net_command(cmd: Dictionary) -> void:
 func _apply_house_command(cmd_villagers: Array) -> void:
 	## Shared logic for house enter/exit used by both local and network paths.
 	var released_any := false
-	for building in homes + churches:
+	for building in homes + churches + town_halls:
 		var to_release: Array = []
 		for v in building.sheltered:
 			if is_instance_valid(v) and v in cmd_villagers:
@@ -1139,7 +1206,7 @@ func _apply_house_command(cmd_villagers: Array) -> void:
 			continue
 		var best_building: Node = null
 		var best_bd: float = INF
-		for b in homes + churches:
+		for b in homes + churches + town_halls:
 			if b.has_method("can_house_villager") and not b.can_house_villager(v):
 				continue
 			var d: float = v.global_position.distance_to(b.global_position)
@@ -1183,6 +1250,13 @@ func _assign_entities_to_rooms() -> void:
 
 
 func _room_id_at(pos: Vector2) -> int:
+	## O(1) spatial grid lookup with fallback.
+	var cx: int = int(pos.x / _room_grid_cell_size)
+	var cy: int = int(pos.y / _room_grid_cell_size)
+	var key: int = cx * 100000 + cy
+	if _room_grid.has(key):
+		return _room_grid[key]
+	# Fallback: slow scan (shouldn't happen often after grid is built)
 	for room in rooms:
 		if room.get_rect().has_point(pos):
 			return int(room.room_id)
@@ -1194,6 +1268,22 @@ func _room_id_at(pos: Vector2) -> int:
 			best_d = d
 			best_id = int(room.room_id)
 	return best_id
+
+
+func _build_room_grid() -> void:
+	## Precompute spatial grid: each pixel-space cell maps to a room_id.
+	_room_grid.clear()
+	var cs: float = _room_grid_cell_size
+	for room in rooms:
+		var rect: Rect2 = room.get_rect()
+		var rid: int = int(room.room_id)
+		var cx_start: int = int(rect.position.x / cs)
+		var cx_end: int = int(rect.end.x / cs) + 1
+		var cy_start: int = int(rect.position.y / cs)
+		var cy_end: int = int(rect.end.y / cs) + 1
+		for cx in range(cx_start, cx_end):
+			for cy in range(cy_start, cy_end):
+				_room_grid[cx * 100000 + cy] = rid
 
 
 func _get_clicked_building(click_pos: Vector2, buildings: Array) -> Node:
@@ -1236,6 +1326,38 @@ func _update_brain_context() -> void:
 		elif w.is_open:
 			doorway_info.append({"mid": (w.start_pos + w.end_pos) * 0.5, "room_a": w.room_a_id, "room_b": w.room_b_id, "is_open": true})
 
+	# Build per-room building lists and adjacent room centers (for idle behavior)
+	var room_building_cache: Dictionary = {}  # rid -> Array[Node]
+	var all_bldgs: Array = []
+	all_bldgs.append_array(homes)
+	all_bldgs.append_array(churches)
+	all_bldgs.append_array(banks)
+	all_bldgs.append_array(fishing_huts)
+	all_bldgs.append_array(universities)
+	all_bldgs.append_array(farms)
+	for b in all_bldgs:
+		if not is_instance_valid(b):
+			continue
+		var brid: int = _room_id_at(b.global_position)
+		if not room_building_cache.has(brid):
+			room_building_cache[brid] = []
+		room_building_cache[brid].append(b)
+
+	var room_adj_centers: Dictionary = {}  # rid -> Array[Vector2]
+	for door in doorway_info:
+		if not door["is_open"]:
+			continue
+		var ra: int = door["room_a"]
+		var rb: int = door["room_b"]
+		if room_map.has(rb):
+			if not room_adj_centers.has(ra):
+				room_adj_centers[ra] = []
+			room_adj_centers[ra].append(room_map[rb].get_rect().get_center())
+		if room_map.has(ra):
+			if not room_adj_centers.has(rb):
+				room_adj_centers[rb] = []
+			room_adj_centers[rb].append(room_map[ra].get_rect().get_center())
+
 	for v in villagers:
 		var rid: int = v.current_room_id
 		v.brain_enemies = room_enemies.get(rid, [])
@@ -1246,6 +1368,8 @@ func _update_brain_context() -> void:
 		v.brain_has_resource = false
 		v.brain_has_church = false
 		v.has_attract_target = false
+		v.brain_buildings = room_building_cache.get(rid, [])
+		v.brain_room_centers = room_adj_centers.get(rid, [])
 
 		match str(v.color_type):
 			"yellow":
@@ -1260,7 +1384,7 @@ func _update_brain_context() -> void:
 						best_d = d
 						v.brain_nearest_resource_pos = c.global_position
 						v.brain_has_resource = true
-				if str(v.carrying_resource) in ["stone", "diamond"]:
+				if str(v.carrying_resource) in ["stone", "diamond", "grain"]:
 					for b in banks:
 						if _room_id_at(b.global_position) == rid:
 							v.deposit_position = b.global_position
@@ -1382,7 +1506,8 @@ func _process_stone_pickups() -> void:
 		if not is_instance_valid(c) or c.collected:
 			rm.append(c)
 			continue
-		for v in villagers:
+		var crid: int = _room_id_at(c.global_position)
+		for v in room_villagers.get(crid, []):
 			if c.try_collect(v):
 				break
 	for c in rm:
@@ -1395,7 +1520,8 @@ func _process_fish_pickups() -> void:
 		if not is_instance_valid(f) or f.collected:
 			rm.append(f)
 			continue
-		for v in villagers:
+		var frid: int = _room_id_at(f.global_position)
+		for v in room_villagers.get(frid, []):
 			if f.try_collect(v):
 				break
 	for f in rm:
@@ -1404,12 +1530,14 @@ func _process_fish_pickups() -> void:
 
 func _process_deposits() -> void:
 	for b in banks:
-		for v in villagers:
-			if str(v.carrying_resource) in ["stone", "diamond"]:
+		var brid: int = _room_id_at(b.global_position)
+		for v in room_villagers.get(brid, []):
+			if str(v.carrying_resource) in ["stone", "diamond", "grain"]:
 				if b.try_deposit(v):
 					TutorialManager.on_deposit("stone")
 	for h in fishing_huts:
-		for v in villagers:
+		var hrid: int = _room_id_at(h.global_position)
+		for v in room_villagers.get(hrid, []):
 			if str(v.carrying_resource) == "fish":
 				if h.try_deposit(v):
 					TutorialManager.on_fish_delivered()
@@ -1612,6 +1740,15 @@ func _on_phase_changed(is_daytime: bool) -> void:
 				if str(v.color_type) == "blue" and v.level == 3:
 					v.extend_l3_lifespan()
 					EventFeed.push("A blue L3 villager rested and lives on.", Color(0.3, 0.5, 0.9))
+		# University training: buff sheltered reds at dawn
+		for u in universities:
+			u.apply_training()
+			var trained_count: int = 0
+			for v in u.sheltered:
+				if is_instance_valid(v) and str(v.color_type) == "red":
+					trained_count += 1
+			if trained_count > 0:
+				EventFeed.push("%d red villager(s) trained at university." % trained_count, Color(0.9, 0.6, 0.2))
 		for v in villagers:
 			if str(v.color_type) == "red" and v.is_fed:
 				TutorialManager.on_red_day_survived()
@@ -1620,6 +1757,10 @@ func _on_phase_changed(is_daytime: bool) -> void:
 			h.release_all()
 		for ch in churches:
 			ch.release_all()
+		for u in universities:
+			u.release_all()
+		for f in farms:
+			f.release_all()
 		_despawn_night_enemies()
 	else:
 		_auto_shelter_villagers()
@@ -1649,20 +1790,20 @@ func _auto_shelter_villagers() -> void:
 			continue
 		var best_building: Node = null
 		var best_d: float = INF
-		for h in homes:
-			if h.has_method("can_house_villager") and not h.can_house_villager(v):
+		# Check all housing buildings
+		var all_housing: Array = []
+		all_housing.append_array(homes)
+		all_housing.append_array(churches)
+		all_housing.append_array(universities)
+		all_housing.append_array(farms)
+		all_housing.append_array(town_halls)
+		for bld in all_housing:
+			if bld.has_method("can_house_villager") and not bld.can_house_villager(v):
 				continue
-			var d: float = v.global_position.distance_to(h.global_position)
+			var d: float = v.global_position.distance_to(bld.global_position)
 			if d < best_d:
 				best_d = d
-				best_building = h
-		for ch in churches:
-			if ch.has_method("can_house_villager") and not ch.can_house_villager(v):
-				continue
-			var d: float = v.global_position.distance_to(ch.global_position)
-			if d < best_d:
-				best_d = d
-				best_building = ch
+				best_building = bld
 		if best_building:
 			best_building.try_house_villager(v)
 
@@ -2026,6 +2167,12 @@ func _update_hud() -> void:
 			b_type = "Bank"
 		elif b in fishing_huts:
 			b_type = "Fishing Hut"
+		elif b in universities:
+			b_type = "University"
+		elif b in farms:
+			b_type = "Farm"
+		elif b in town_halls:
+			b_type = "Town Hall"
 		var b_cap: int = b.get_capacity() if b.has_method("get_capacity") else 0
 		var b_occ: int = b.get_sheltered_count() if b.has_method("get_sheltered_count") else 0
 		var b_fid: int = b.placed_by_faction if b.get("placed_by_faction") != null else -1
@@ -2164,14 +2311,119 @@ func _process_room_respawns(delta: float) -> void:
 				fish_spots.append(f)
 
 
+func _process_farm_grain(delta: float) -> void:
+	## Farms produce grain collectables over time during daytime.
+	if not GameClock.is_daytime:
+		return
+	for f in farms:
+		if not is_instance_valid(f) or f.placed_by_faction < 0:
+			continue
+		if not f.tick_grain(delta):
+			continue
+		# Count nearby grain to avoid flooding
+		var nearby_grain: int = 0
+		for c in collectables:
+			if is_instance_valid(c) and not c.collected and c.resource_type == "grain":
+				if c.global_position.distance_to(f.global_position) < f.GRAIN_SPAWN_RADIUS:
+					nearby_grain += 1
+		if nearby_grain >= f.MAX_GRAIN_NEARBY:
+			continue
+		var grain = _collectable_scene.instantiate()
+		grain.resource_type = "grain"
+		_collectables_container.add_child(grain)
+		var offset := Vector2(
+			GameRNG.randf_range(-f.GRAIN_SPAWN_RADIUS, f.GRAIN_SPAWN_RADIUS),
+			GameRNG.randf_range(-f.GRAIN_SPAWN_RADIUS, f.GRAIN_SPAWN_RADIUS))
+		grain.global_position = f.global_position + offset
+		collectables.append(grain)
+		f.grain_produced += 1
+
+
+const PORTAL_TELEPORT_RADIUS := 80.0
+const PORTAL_COOLDOWN := 1.5  ## seconds before a villager can re-enter a portal
+var _portal_cooldowns: Dictionary = {}  ## villager net_id -> remaining cooldown
+
+func _process_portals() -> void:
+	## Teleport villagers (and enemies) near a portal to the partner portal.
+	if _portals.is_empty() or _portal_pairs.is_empty():
+		return
+
+	# Tick down cooldowns
+	var expired: Array = []
+	for nid in _portal_cooldowns:
+		_portal_cooldowns[nid] -= get_process_delta_time()
+		if _portal_cooldowns[nid] <= 0.0:
+			expired.append(nid)
+	for nid in expired:
+		_portal_cooldowns.erase(nid)
+
+	# Build portal position lookup: room_id -> global_position of portal node
+	var portal_positions: Dictionary = {}
+	for p in _portals:
+		if is_instance_valid(p):
+			portal_positions[p.room_id] = p.global_position
+
+	# Check villagers
+	for v in villagers:
+		if not is_instance_valid(v) or not v.visible:
+			continue
+		if _portal_cooldowns.has(v.net_id):
+			continue
+		var rid: int = v.current_room_id
+		if not _portal_pairs.has(rid):
+			continue
+		var portal_pos: Vector2 = portal_positions.get(rid, Vector2.ZERO)
+		if portal_pos == Vector2.ZERO:
+			continue
+		if v.global_position.distance_to(portal_pos) > PORTAL_TELEPORT_RADIUS:
+			continue
+		# Teleport to partner portal
+		var partner_rid: int = _portal_pairs[rid]
+		var dest_pos: Vector2 = portal_positions.get(partner_rid, Vector2.ZERO)
+		if dest_pos == Vector2.ZERO:
+			continue
+		# Offset slightly so they don't immediately re-trigger
+		var offset := Vector2(PORTAL_TELEPORT_RADIUS + 20.0, 0).rotated(
+			GameRNG.randf_range(0.0, TAU))
+		v.global_position = dest_pos + offset
+		_portal_cooldowns[v.net_id] = PORTAL_COOLDOWN
+		# Clear any move command so they don't path back
+		if v.command_mode == "move_to":
+			v.command_mode = "none"
+
+	# Check enemies
+	for e in enemies:
+		if not is_instance_valid(e) or e.is_dead:
+			continue
+		var eid: int = e.net_id
+		if _portal_cooldowns.has(eid + 100000):
+			continue
+		var rid: int = e.current_room_id
+		if not _portal_pairs.has(rid):
+			continue
+		var portal_pos: Vector2 = portal_positions.get(rid, Vector2.ZERO)
+		if portal_pos == Vector2.ZERO:
+			continue
+		if e.global_position.distance_to(portal_pos) > PORTAL_TELEPORT_RADIUS:
+			continue
+		var partner_rid: int = _portal_pairs[rid]
+		var dest_pos: Vector2 = portal_positions.get(partner_rid, Vector2.ZERO)
+		if dest_pos == Vector2.ZERO:
+			continue
+		var offset := Vector2(PORTAL_TELEPORT_RADIUS + 20.0, 0).rotated(
+			GameRNG.randf_range(0.0, TAU))
+		e.global_position = dest_pos + offset
+		_portal_cooldowns[eid + 100000] = PORTAL_COOLDOWN
+
+
 # ==============================================================================
 # HOST-AUTHORITATIVE NETWORKING
 # ==============================================================================
 
 const COLOR_TO_IDX := {"red": 0, "yellow": 1, "blue": 2, "colorless": 3, "magic_orb": 4}
 const IDX_TO_COLOR := ["red", "yellow", "blue", "colorless", "magic_orb"]
-const CARRY_TO_IDX := {"": 0, "stone": 1, "fish": 2, "diamond": 3}
-const IDX_TO_CARRY := ["", "stone", "fish", "diamond"]
+const CARRY_TO_IDX := {"": 0, "stone": 1, "fish": 2, "diamond": 3, "grain": 4}
+const IDX_TO_CARRY := ["", "stone", "fish", "diamond", "grain"]
 const CMD_TO_IDX := {"none": 0, "move_to": 1, "hold": 2}
 const IDX_TO_CMD := ["none", "move_to", "hold"]
 

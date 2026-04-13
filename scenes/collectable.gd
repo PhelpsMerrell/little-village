@@ -1,6 +1,6 @@
 extends Node2D
 ## Resource on the ground. Only yellows pick it up.
-## Supports "stone" and "diamond" types.
+## Supports "stone", "diamond", and "grain" types.
 
 const RADIUS := 12.0
 var collected: bool = false
@@ -20,16 +20,21 @@ func _ready() -> void:
 
 func _update_visual() -> void:
 	var is_diamond: bool = (resource_type == "diamond")
+	var is_grain: bool = (resource_type == "grain")
+	var is_stone: bool = (not is_diamond and not is_grain)
 	if _stone_body:
-		_stone_body.visible = not is_diamond
+		_stone_body.visible = is_stone
 	if _stone_highlight:
-		_stone_highlight.visible = not is_diamond
+		_stone_highlight.visible = is_stone
 	if _diamond_body:
 		_diamond_body.visible = is_diamond
 	if _diamond_outline:
 		_diamond_outline.visible = is_diamond
 	if _diamond_highlight:
 		_diamond_highlight.visible = is_diamond
+	# Grain uses _draw() — hide all polygon children
+	if is_grain:
+		queue_redraw()
 
 
 func try_collect(villager: Node) -> bool:
@@ -49,3 +54,16 @@ func try_collect(villager: Node) -> bool:
 		tw.tween_callback(queue_free)
 		return true
 	return false
+
+
+func _draw() -> void:
+	if resource_type != "grain" or collected:
+		return
+	# Wheat sheaf icon
+	draw_line(Vector2(0, 6), Vector2(0, -8), Color(0.7, 0.6, 0.15, 1.0), 2.0)
+	draw_line(Vector2(-4, 6), Vector2(-3, -5), Color(0.7, 0.6, 0.15, 1.0), 1.5)
+	draw_line(Vector2(4, 6), Vector2(3, -5), Color(0.7, 0.6, 0.15, 1.0), 1.5)
+	# Grain heads
+	draw_circle(Vector2(0, -9), 3.0, Color(0.9, 0.8, 0.2, 1.0))
+	draw_circle(Vector2(-3, -6), 2.5, Color(0.85, 0.75, 0.2, 1.0))
+	draw_circle(Vector2(3, -6), 2.5, Color(0.85, 0.75, 0.2, 1.0))

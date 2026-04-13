@@ -55,7 +55,7 @@ func check_time_events() -> void:
 				elif GameClock.is_new_moon():
 					push("Darkness gathers under the new moon.", Color(0.4, 0.5, 0.6))
 				else:
-					push("Nighttime approaches... (%s)" % moon, Color(0.7, 0.5, 0.3))
+					push("Darkness approaches! Get in your homes!", Color(0.8, 0.4, 0.25))
 			"nightfall":
 				push("The %s rises." % GameClock.get_moon_phase_name().to_lower(), Color(0.4, 0.4, 0.7))
 			"midnight":

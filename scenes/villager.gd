@@ -66,6 +66,7 @@ var combat_mode: String = ""     ## "attack" or "stun"
 var pending_shift_color: String = ""
 
 var kill_count: int = 0
+var fire_rate_bonus: float = 0.0  ## cumulative % reduction from university training
 var is_fed: bool = true
 var _satiation_timer: float = 0.0  # seconds remaining before next fish needed
 
@@ -148,6 +149,10 @@ var _dying := false
 var _death_timer := 0.0
 const DEATH_TWITCH_DURATION := 1.2
 
+var _brain_frame_offset: int = 0  ## Set at creation to stagger brain ticks
+var _frame_counter: int = 0
+const BRAIN_SKIP_FRAMES := 3  ## Idle villagers only think every N frames
+
 @onready var _area: Area2D = $InputArea
 @onready var _col_shape: CollisionShape2D = $InputArea/CollisionShape2D
 @onready var _label: Label = $ShiftLabel
@@ -170,6 +175,7 @@ signal resource_dropped(villager: Node2D, resource_type: String)
 
 func _ready() -> void:
 	_area.input_event.connect(_on_area_input); _sync_definition()
+	_brain_frame_offset = randi() % BRAIN_SKIP_FRAMES  ## Stagger across villagers
 
 func setup(p_color: String, pos: Vector2, p_level: int = 1) -> void:
 	color_type = p_color; position = pos; level = p_level
@@ -201,6 +207,10 @@ func set_level(new_level: int) -> void:
 
 func record_kill() -> void: kill_count += 1
 func is_carrying() -> bool: return carrying_resource != ""
+
+func get_shoot_cooldown() -> float:
+	## Effective cooldown after university training bonus.
+	return SHOOT_COOLDOWN * maxf(0.1, 1.0 - fire_rate_bonus)
 
 func get_display_name() -> String:
 	if villager_name.is_empty():
@@ -288,7 +298,14 @@ func _process(delta: float) -> void:
 			_die_from_lifespan()
 			return
 	if not _dragging and _move_speed > 0.0:
-		_evaluate_brain(delta); _do_movement(delta); _apply_separation()
+		_frame_counter += 1
+		# Active states always think; idle villagers skip frames
+		var should_think: bool = true
+		if _brain_state == "idle" and _arrived:
+			should_think = ((_frame_counter + _brain_frame_offset) % BRAIN_SKIP_FRAMES == 0)
+		if should_think:
+			_evaluate_brain(delta)
+		_do_movement(delta); _apply_separation()
 	_update_visuals()
 	queue_redraw()
 
@@ -372,13 +389,13 @@ func _check_combat_command() -> bool:
 	if combat_mode == "attack" and dist < SHOOT_RANGE and _shoot_cooldown <= 0.0:
 		shoot_target_enemy = combat_target
 		shoot_target_pos = combat_target.global_position
-		_shoot_cooldown = SHOOT_COOLDOWN
+		_shoot_cooldown = get_shoot_cooldown()
 		_shot_flash_timer = 0.15
 		_set_target(combat_target.global_position)
 	elif combat_mode == "stun" and dist < radius + target_radius + 20.0:
 		if combat_target.has_method("apply_stun"):
 			combat_target.apply_stun(2.0)
-		_shoot_cooldown = SHOOT_COOLDOWN
+		_shoot_cooldown = get_shoot_cooldown()
 	else:
 		_set_target(combat_target.global_position)
 
@@ -436,7 +453,7 @@ func _check_danger() -> bool:
 			if enemy_dist <= SHOOT_RANGE and _shoot_cooldown <= 0.0:
 				shoot_target_enemy = nearest_enemy
 				shoot_target_pos = nearest_enemy.global_position
-				_shoot_cooldown = SHOOT_COOLDOWN; _shot_flash_timer = 0.15
+				_shoot_cooldown = get_shoot_cooldown(); _shot_flash_timer = 0.15
 		_: return false
 	return true
 
@@ -905,6 +922,7 @@ func _update_visuals() -> void:
 			"stone": _carry_indicator.color = Color(0.5, 0.52, 0.48)
 			"diamond": _carry_indicator.color = Color(0.4, 0.85, 0.95)
 			"fish": _carry_indicator.color = Color(0.3, 0.55, 0.75)
+			"grain": _carry_indicator.color = Color(0.85, 0.75, 0.2)
 	else:
 		_carry_indicator.visible = false
 

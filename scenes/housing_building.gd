@@ -34,9 +34,12 @@ func can_house_villager(v: Node) -> bool:
 		return false
 	if not "faction_id" in v:
 		return false
-	if placed_by_faction < 0:
+	if placed_by_faction == -1:
+		return false  # Neutral/unassigned
+	# Preplaced (-2) accepts any faction; owned checks match
+	if placed_by_faction >= 0 and int(v.faction_id) != placed_by_faction:
 		return false
-	return int(v.faction_id) == placed_by_faction
+	return true
 
 
 func try_house_villager(v: Node) -> bool:

@@ -15,13 +15,14 @@ func supports_resource_dropoff() -> bool:
 func accepts_villager(v: Node) -> bool:
 	if v == null or not is_instance_valid(v):
 		return false
-	if placed_by_faction < 0:
-		return false
+	if placed_by_faction == -1:
+		return false  # Neutral/unassigned — nobody deposits
 	if not "faction_id" in v:
 		return false
-	if int(v.faction_id) != placed_by_faction:
-		return false
 	if not "carrying_resource" in v:
+		return false
+	# Preplaced buildings (-2) accept ANY faction; owned buildings check match
+	if placed_by_faction >= 0 and int(v.faction_id) != placed_by_faction:
 		return false
 	return str(v.carrying_resource) == accepted_resource
 

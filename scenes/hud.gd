@@ -335,7 +335,7 @@ func _update_population_panel() -> void:
 	var my_fish: int = Economy.get_fish(fid)
 	var my_diamonds: int = Economy.get_diamonds(fid)
 	_stone_label.text = "Stone: %d" % my_stone
-	_fish_label.text = "Fish: %d  |  Diamonds: %d" % [my_fish, my_diamonds]
+	_fish_label.text = "Fish: %d  |  Diamonds: %d  |  Grain: %d" % [my_fish, my_diamonds, Economy.get_grain(fid)]
 
 
 func _update_pending_command() -> void:
@@ -465,6 +465,10 @@ func _update_building_panel() -> void:
 		sell_item_id = "bank"
 	elif btype == "Fishing Hut":
 		sell_item_id = "fishing_hut"
+	elif btype == "University":
+		sell_item_id = "university"
+	elif btype == "Farm":
+		sell_item_id = "farm"
 
 	var sell_val: int = Economy.get_sell_value(sell_item_id)
 	var is_preplaced: bool = (selected_building_info.get("faction_id", -1) == -2)
@@ -504,6 +508,18 @@ func _draw_building_icon() -> void:
 		_building_icon.draw_colored_polygon(PackedVector2Array([
 			Vector2(cx, cy - 36), Vector2(cx + 30, cy - 10), Vector2(cx - 30, cy - 10)
 		]), Color(0.25, 0.35, 0.5, 0.8))
+	elif btype == "University":
+		_building_icon.draw_rect(Rect2(cx - 28, cy - 10, 56, 30), Color(0.35, 0.28, 0.2, 0.8))
+		_building_icon.draw_colored_polygon(PackedVector2Array([
+			Vector2(cx, cy - 38), Vector2(cx + 34, cy - 10), Vector2(cx - 34, cy - 10)
+		]), Color(0.5, 0.3, 0.15, 0.8))
+		_building_icon.draw_rect(Rect2(cx - 6, cy, 12, 10), Color(0.85, 0.65, 0.2, 0.8))
+	elif btype == "Farm":
+		_building_icon.draw_rect(Rect2(cx - 28, cy - 8, 56, 28), Color(0.4, 0.35, 0.2, 0.8))
+		_building_icon.draw_colored_polygon(PackedVector2Array([
+			Vector2(cx, cy - 34), Vector2(cx + 34, cy - 8), Vector2(cx - 34, cy - 8)
+		]), Color(0.55, 0.45, 0.15, 0.8))
+		_building_icon.draw_line(Vector2(cx, cy + 12), Vector2(cx, cy - 2), Color(0.85, 0.75, 0.2, 0.8), 2.0)
 
 
 # ── Score Overlay ────────────────────────────────────────────────
