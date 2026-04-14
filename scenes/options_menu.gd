@@ -60,11 +60,10 @@ func _build_buttons() -> void:
 
 	_dev_mode_btn = _make_btn("Dev Mode: OFF", Color(0.25, 0.2, 0.35))
 	_dev_mode_btn.pressed.connect(func():
-		_dev_mode_on = not _dev_mode_on
-		_dev_mode_btn.text = "Dev Mode: ON" if _dev_mode_on else "Dev Mode: OFF"
-		_style_btn(_dev_mode_btn, Color(0.45, 0.2, 0.55) if _dev_mode_on else Color(0.25, 0.2, 0.35))
+		set_dev_mode_enabled(not _dev_mode_on)
 		dev_command.emit("toggle_dev_mode"))
 	_left_buttons.add_child(_dev_mode_btn)
+	set_dev_mode_enabled(_dev_mode_on)
 
 	_clear(_right_buttons)
 
@@ -152,6 +151,13 @@ func open() -> void:
 		_right_buttons.visible = is_host
 	if _dev_tools_label != null:
 		_dev_tools_label.visible = is_host
+
+
+func set_dev_mode_enabled(enabled: bool) -> void:
+	_dev_mode_on = enabled
+	if _dev_mode_btn != null:
+		_dev_mode_btn.text = "Dev Mode: ON" if _dev_mode_on else "Dev Mode: OFF"
+		_style_btn(_dev_mode_btn, Color(0.45, 0.2, 0.55) if _dev_mode_on else Color(0.25, 0.2, 0.35))
 
 
 func close() -> void:

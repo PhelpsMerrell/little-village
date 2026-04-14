@@ -1,0 +1,17 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/room_layouts/room_layout.gd" id="1_layout"]
+[ext_resource type="Script" path="res://scenes/room_layouts/room_spawn_marker.gd" id="2_marker"]
+
+[node name="ColorlessPassageLayout" type="Node2D"]
+script = ExtResource("1_layout")
+
+[node name="Colorless01" type="Node2D" parent="."]
+position = Vector2(430, 680)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless02" type="Node2D" parent="."]
+position = Vector2(890, 680)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"

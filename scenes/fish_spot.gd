@@ -32,7 +32,7 @@ func try_collect(villager: Node) -> bool:
 
 
 func _process(delta: float) -> void:
-	if collected:
+	if collected or not visible:
 		return
 	_bob_time += delta * 2.0
 	var bob := sin(_bob_time) * 3.0

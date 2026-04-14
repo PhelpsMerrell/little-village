@@ -78,8 +78,25 @@ const FOOTPRINTS := [
 	[1, 1],
 ]
 
+const LAYOUT_KEY_CORE_STANDARD := "__core_standard"
+const LAYOUT_KEY_CORE_SURVIVAL := "__core_survival"
+const ROOM_LAYOUT_PATHS := {
+	RT_STONE: "res://scenes/room_layouts/stone_room_layout.tscn",
+	RT_RIVER: "res://scenes/room_layouts/river_room_layout.tscn",
+	RT_QUARRY: "res://scenes/room_layouts/quarry_layout.tscn",
+	RT_ENEMY_DEN: "res://scenes/room_layouts/enemy_den_layout.tscn",
+	RT_COLORLESS_PASSAGE: "res://scenes/room_layouts/colorless_passage_layout.tscn",
+	RT_COLORLESS_CAMP: "res://scenes/room_layouts/colorless_camp_layout.tscn",
+	RT_CONTESTED: "res://scenes/room_layouts/contested_layout.tscn",
+	RT_DIAMOND: "res://scenes/room_layouts/diamond_cave_layout.tscn",
+	RT_PORTAL: "res://scenes/room_layouts/portal_layout.tscn",
+	LAYOUT_KEY_CORE_STANDARD: "res://scenes/room_layouts/core_standard_layout.tscn",
+	LAYOUT_KEY_CORE_SURVIVAL: "res://scenes/room_layouts/core_survival_layout.tscn",
+}
+
 ## Loaded room template cell patterns: Array of {cells: Array[Vector2i], name: String}
 var _room_templates: Array = []
+var _room_layout_scenes: Dictionary = {}
 
 
 func _load_room_templates() -> void:
@@ -104,21 +121,32 @@ func _load_room_templates() -> void:
 		var inst = scene.instantiate()
 		if inst == null or not inst.has_method("get_cells"):
 			if inst:
-				inst.queue_free()
+				inst.free()
 			continue
 		var cells: Array = inst.get_cells()
 		var tname: String = inst.name
-		inst.queue_free()
+		inst.free()
 		if cells.size() > 0:
 			_room_templates.append({"cells": cells, "name": tname})
 	# Sort by cell count descending (largest templates placed first)
 	_room_templates.sort_custom(func(a, b): return a["cells"].size() > b["cells"].size())
 
 
+func _load_room_layouts() -> void:
+	_room_layout_scenes.clear()
+	for key in ROOM_LAYOUT_PATHS:
+		var path: String = ROOM_LAYOUT_PATHS[key]
+		if not ResourceLoader.exists(path):
+			continue
+		var scene: PackedScene = load(path)
+		if scene != null:
+			_room_layout_scenes[key] = scene
+
+
 func _can_place_cells(anchor: Vector2i, cells: Array) -> bool:
 	## True if all cells of this template are in the island mask and free.
 	for offset in cells:
-		var cell := anchor + offset
+		var cell: Vector2i = anchor + Vector2i(offset)
 		if not _island_mask.has(cell):
 			return false
 		if not _grid.has(cell):
@@ -131,7 +159,7 @@ func _can_place_cells(anchor: Vector2i, cells: Array) -> bool:
 func _mark_grid_cells(anchor: Vector2i, cells: Array, room_id: int) -> void:
 	## Mark all cells of a template as belonging to room_id.
 	for offset in cells:
-		var cell := anchor + offset
+		var cell: Vector2i = anchor + Vector2i(offset)
 		if _grid.has(cell):
 			_grid[cell] = room_id
 
@@ -571,6 +599,7 @@ func generate(containers: Dictionary, scenes: Dictionary, map_seed: int = -1,
 	_setup_grid_size(map_size)
 	_init_grid()
 	_load_room_templates()
+	_load_room_layouts()
 	_place_faction_clusters()
 	_connect_faction_clusters()   ## Ensures single connected landmass
 	_fill_neutral_rooms()
@@ -1391,6 +1420,106 @@ func _spawn_wall_with_door(container: Node2D, wall_scene: PackedScene,
 		container.add_child(w2)
 
 
+func _spawn_layout_contents(layout_key: String, room_id: int, room_pos: Vector2, room_size: Vector2,
+		containers: Dictionary, scenes: Dictionary, faction_id: int = -1) -> bool:
+	var layout_scene: PackedScene = _room_layout_scenes.get(layout_key, null)
+	if layout_scene == null:
+		return false
+	var layout = layout_scene.instantiate()
+	if layout == null or not layout.has_method("get_spawn_markers") or not layout.has_method("get_room_position_for_marker"):
+		if layout != null:
+			layout.free()
+		return false
+
+	var room_node = room_map.get(room_id, null)
+	for marker in layout.get_spawn_markers():
+		var spawn_kind: String = str(marker.get("spawn_kind"))
+		var spawn_pos: Vector2 = layout.get_room_position_for_marker(marker, room_pos, room_size)
+		match spawn_kind:
+			"stone":
+				_spawn_resource_at_position(containers, scenes, spawn_pos, "stone")
+			"fish":
+				_spawn_fish_at_position(containers, scenes, spawn_pos)
+			"diamond":
+				_spawn_resource_at_position(containers, scenes, spawn_pos, "diamond")
+			"enemy":
+				_spawn_enemy_at_position(containers, scenes, spawn_pos)
+			"colorless":
+				_spawn_colorless_at_position(containers, scenes, spawn_pos)
+			"bank":
+				var bank = scenes["bank"].instantiate()
+				containers["banks"].add_child(bank)
+				bank.global_position = spawn_pos
+				bank.placed_by_faction = -2
+			"fishing_hut":
+				var hut = scenes["hut"].instantiate()
+				containers["huts"].add_child(hut)
+				hut.global_position = spawn_pos
+				hut.placed_by_faction = -2
+			"town_hall":
+				if faction_id >= 0 and scenes.has("town_hall") and containers.has("town_halls"):
+					var th = scenes["town_hall"].instantiate()
+					containers["town_halls"].add_child(th)
+					th.global_position = spawn_pos
+					th.placed_by_faction = faction_id
+			"portal":
+				if scenes.has("portal"):
+					var p = scenes["portal"].instantiate()
+					containers["portals"].add_child(p)
+					p.global_position = spawn_pos
+					p.room_id = room_id
+					p.partner_room_id = portal_pairs.get(room_id, -1)
+			"river":
+				if room_node != null and scenes.has("river"):
+					var river = scenes["river"].instantiate()
+					room_node.add_child(river)
+					river.position = spawn_pos - room_node.global_position
+			"red", "yellow", "blue":
+				if faction_id >= 0:
+					var v = scenes["villager"].instantiate()
+					containers["villagers"].add_child(v)
+					v.setup(spawn_kind, spawn_pos)
+					v.faction_id = faction_id
+					if spawn_kind == "red":
+						v._satiation_timer = v.SATIATION_PER_LEVEL[1]
+						v.is_fed = true
+			"magic_orb":
+				if faction_id >= 0:
+					var orb = scenes["villager"].instantiate()
+					containers["villagers"].add_child(orb)
+					orb.setup("magic_orb", spawn_pos)
+					orb.faction_id = faction_id
+
+	layout.free()
+	return true
+
+
+func _spawn_resource_at_position(containers: Dictionary, scenes: Dictionary, pos: Vector2, resource_type: String = "stone") -> void:
+	var c = scenes["collectable"].instantiate()
+	containers["collectables"].add_child(c)
+	c.global_position = pos
+	c.resource_type = resource_type
+
+
+func _spawn_fish_at_position(containers: Dictionary, scenes: Dictionary, pos: Vector2) -> void:
+	var f = scenes["fish"].instantiate()
+	containers["fish"].add_child(f)
+	f.global_position = pos
+
+
+func _spawn_enemy_at_position(containers: Dictionary, scenes: Dictionary, pos: Vector2) -> void:
+	var e = scenes["enemy"].instantiate()
+	containers["enemies"].add_child(e)
+	e.global_position = pos
+
+
+func _spawn_colorless_at_position(containers: Dictionary, scenes: Dictionary, pos: Vector2) -> void:
+	var v = scenes["villager"].instantiate()
+	containers["villagers"].add_child(v)
+	v.setup("colorless", pos)
+	v.faction_id = -1
+
+
 # ==============================================================================
 # ENTITY GENERATION — neutral rooms
 # ==============================================================================
@@ -1413,69 +1542,78 @@ func _generate_entities(containers: Dictionary, scenes: Dictionary) -> void:
 
 		match rtype:
 			RT_QUARRY:
-				for i in _rng.randi_range(8, 15):
-					_spawn_stone(containers, scenes, rpos, rsize)
+				if not _spawn_layout_contents(RT_QUARRY, rid, rpos, rsize, containers, scenes):
+					for i in _rng.randi_range(8, 15):
+						_spawn_stone(containers, scenes, rpos, rsize)
 
 			RT_RIVER:
-				var hut = scenes["hut"].instantiate()
-				containers["huts"].add_child(hut)
-				hut.global_position = Vector2(center.x, rpos.y + 200)
-				hut.placed_by_faction = -2
-				for i in _rng.randi_range(2, 4):
-					_spawn_fish(containers, scenes, rpos, rsize)
-				var room_node = room_map.get(rid)
-				if room_node and scenes.has("river"):
-					var river = scenes["river"].instantiate()
-					room_node.add_child(river)
-					river.position = Vector2(50, 50)
+				if not _spawn_layout_contents(RT_RIVER, rid, rpos, rsize, containers, scenes):
+					var hut = scenes["hut"].instantiate()
+					containers["huts"].add_child(hut)
+					hut.global_position = Vector2(center.x, rpos.y + 200)
+					hut.placed_by_faction = -2
+					for i in _rng.randi_range(2, 4):
+						_spawn_fish(containers, scenes, rpos, rsize)
+					var room_node = room_map.get(rid)
+					if room_node and scenes.has("river"):
+						var river = scenes["river"].instantiate()
+						room_node.add_child(river)
+						river.position = Vector2(50, 50)
 
 			RT_ENEMY_DEN:
-				for i in _rng.randi_range(2, 3):
-					var e = scenes["enemy"].instantiate()
-					containers["enemies"].add_child(e)
-					e.global_position = _rand_in_room(rpos, rsize, 100.0)
+				if not _spawn_layout_contents(RT_ENEMY_DEN, rid, rpos, rsize, containers, scenes):
+					for i in _rng.randi_range(2, 3):
+						var e = scenes["enemy"].instantiate()
+						containers["enemies"].add_child(e)
+						e.global_position = _rand_in_room(rpos, rsize, 100.0)
 
 			RT_COLORLESS_PASSAGE:
-				for i in _rng.randi_range(1, 3):
-					_spawn_colorless(containers, scenes, center)
+				if not _spawn_layout_contents(RT_COLORLESS_PASSAGE, rid, rpos, rsize, containers, scenes):
+					for i in _rng.randi_range(1, 3):
+						_spawn_colorless(containers, scenes, center)
 
 			RT_COLORLESS_CAMP:
-				for i in _rng.randi_range(6, 10):
-					_spawn_colorless(containers, scenes, center)
+				if not _spawn_layout_contents(RT_COLORLESS_CAMP, rid, rpos, rsize, containers, scenes):
+					for i in _rng.randi_range(6, 10):
+						_spawn_colorless(containers, scenes, center)
 
 			RT_CONTESTED:
-				for i in _rng.randi_range(1, 2):
-					var e = scenes["enemy"].instantiate()
-					containers["enemies"].add_child(e)
-					e.global_position = _rand_in_room(rpos, rsize, 100.0)
-				for i in _rng.randi_range(4, 8):
-					_spawn_stone(containers, scenes, rpos, rsize)
+				if not _spawn_layout_contents(RT_CONTESTED, rid, rpos, rsize, containers, scenes):
+					for i in _rng.randi_range(1, 2):
+						var e = scenes["enemy"].instantiate()
+						containers["enemies"].add_child(e)
+						e.global_position = _rand_in_room(rpos, rsize, 100.0)
+					for i in _rng.randi_range(4, 8):
+						_spawn_stone(containers, scenes, rpos, rsize)
 
 			RT_DIAMOND:
-				# Diamond cave: guarded by enemies, contains diamonds
-				for i in _rng.randi_range(1, 3):
-					var e = scenes["enemy"].instantiate()
-					containers["enemies"].add_child(e)
-					e.global_position = _rand_in_room(rpos, rsize, 100.0)
-				for i in _rng.randi_range(4, 8):
-					_spawn_diamond(containers, scenes, rpos, rsize)
+				if not _spawn_layout_contents(RT_DIAMOND, rid, rpos, rsize, containers, scenes):
+					# Diamond cave: guarded by enemies, contains diamonds
+					for i in _rng.randi_range(1, 3):
+						var e = scenes["enemy"].instantiate()
+						containers["enemies"].add_child(e)
+						e.global_position = _rand_in_room(rpos, rsize, 100.0)
+					for i in _rng.randi_range(4, 8):
+						_spawn_diamond(containers, scenes, rpos, rsize)
 
 			RT_PORTAL:
-				# Portal visual entity — spawned at room center
-				if scenes.has("portal"):
-					var p = scenes["portal"].instantiate()
-					containers["portals"].add_child(p)
-					p.global_position = center
-					p.room_id = rid
-					p.partner_room_id = portal_pairs.get(rid, -1)
+				if not _spawn_layout_contents(RT_PORTAL, rid, rpos, rsize, containers, scenes):
+					# Portal visual entity — spawned at room center
+					if scenes.has("portal"):
+						var p = scenes["portal"].instantiate()
+						containers["portals"].add_child(p)
+						p.global_position = center
+						p.room_id = rid
+						p.partner_room_id = portal_pairs.get(rid, -1)
 
 			RT_STONE:
-				var bank = scenes["bank"].instantiate()
-				containers["banks"].add_child(bank)
-				bank.global_position = Vector2(center.x, rpos.y + 200)
-				bank.placed_by_faction = -2
-				for i in _rng.randi_range(8, 15):
-					_spawn_stone(containers, scenes, rpos, rsize)
+				if not _spawn_layout_contents(RT_STONE, rid, rpos, rsize, containers, scenes):
+					var bank = scenes["bank"].instantiate()
+					containers["banks"].add_child(bank)
+					bank.global_position = Vector2(center.x, rpos.y + 200)
+					bank.placed_by_faction = -2
+					for i in _rng.randi_range(8, 15):
+						_spawn_stone(containers, scenes, rpos, rsize)
 
 
 func _spawn_stone(containers: Dictionary, scenes: Dictionary, rpos: Vector2, rsize: Vector2) -> void:
@@ -1528,86 +1666,90 @@ func _generate_faction_starts(containers: Dictionary, scenes: Dictionary) -> voi
 		var hcenter: Vector2 = hpos + hsize * 0.5
 		var margin: float = 150.0
 
-		var color_defs: Array
-		var orb_pos: Vector2 = hcenter
-		if is_survival:
-			# Survival: 5 villagers (2R, 2Y, 1B), no orb
-			color_defs = [
-				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
-				{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin + 60, hpos.y + margin + 40)},
-				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
-				{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin - 60, hpos.y + margin + 40)},
-				{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
-			]
-		else:
-			# Standard: 3 villagers + orb — red closest to door, orb furthest
-			var spawn_dir: ClusterDir = _cluster_direction(_faction_spawn_cells[fi])
-			var door_edge: Vector2
-			match spawn_dir:
-				ClusterDir.RIGHT: door_edge = Vector2(hpos.x + hsize.x, hpos.y + hsize.y * 0.5)
-				ClusterDir.LEFT:  door_edge = Vector2(hpos.x, hpos.y + hsize.y * 0.5)
-				ClusterDir.DOWN:  door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y + hsize.y)
-				_:                door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y)
-			var corners := [
-				Vector2(hpos.x + margin, hpos.y + margin),
-				Vector2(hpos.x + hsize.x - margin, hpos.y + margin),
-				Vector2(hpos.x + margin, hpos.y + hsize.y - margin),
-				Vector2(hpos.x + hsize.x - margin, hpos.y + hsize.y - margin),
-			]
-			corners.sort_custom(func(a, b): return a.distance_to(door_edge) < b.distance_to(door_edge))
-			orb_pos = corners[3]
-			color_defs = [
-				{"color": "red",    "fed": true,  "pos": corners[0]},
-				{"color": "yellow", "fed": false, "pos": corners[1]},
-				{"color": "blue",   "fed": false, "pos": corners[2]},
-			]
-		for cd in color_defs:
-			var v = scenes["villager"].instantiate()
-			containers["villagers"].add_child(v)
-			v.setup(str(cd["color"]), cd["pos"] + Vector2(_rng.randf_range(-30, 30), _rng.randf_range(-30, 30)))
-			v.faction_id = _faction_id_map[fi]
-			if cd["fed"]:
-				v._satiation_timer = v.SATIATION_PER_LEVEL[1]
-				v.is_fed = true
+		var core_layout_key: String = LAYOUT_KEY_CORE_SURVIVAL if is_survival else LAYOUT_KEY_CORE_STANDARD
+		if not _spawn_layout_contents(core_layout_key, core_id, hpos, hsize, containers, scenes, _faction_id_map[fi]):
+			var color_defs: Array
+			var orb_pos: Vector2 = hcenter
+			if is_survival:
+				# Survival: 5 villagers (2R, 2Y, 1B), no orb
+				color_defs = [
+					{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin, hpos.y + margin)},
+					{"color": "red",    "fed": true,  "pos": Vector2(hpos.x + margin + 60, hpos.y + margin + 40)},
+					{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin, hpos.y + margin)},
+					{"color": "yellow", "fed": false, "pos": Vector2(hpos.x + hsize.x - margin - 60, hpos.y + margin + 40)},
+					{"color": "blue",   "fed": false, "pos": Vector2(hpos.x + margin, hpos.y + hsize.y - margin)},
+				]
+			else:
+				# Standard: 3 villagers + orb — red closest to door, orb furthest
+				var spawn_dir: ClusterDir = _cluster_direction(_faction_spawn_cells[fi])
+				var door_edge: Vector2
+				match spawn_dir:
+					ClusterDir.RIGHT: door_edge = Vector2(hpos.x + hsize.x, hpos.y + hsize.y * 0.5)
+					ClusterDir.LEFT:  door_edge = Vector2(hpos.x, hpos.y + hsize.y * 0.5)
+					ClusterDir.DOWN:  door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y + hsize.y)
+					_:                door_edge = Vector2(hpos.x + hsize.x * 0.5, hpos.y)
+				var corners := [
+					Vector2(hpos.x + margin, hpos.y + margin),
+					Vector2(hpos.x + hsize.x - margin, hpos.y + margin),
+					Vector2(hpos.x + margin, hpos.y + hsize.y - margin),
+					Vector2(hpos.x + hsize.x - margin, hpos.y + hsize.y - margin),
+				]
+				corners.sort_custom(func(a, b): return a.distance_to(door_edge) < b.distance_to(door_edge))
+				orb_pos = corners[3]
+				color_defs = [
+					{"color": "red",    "fed": true,  "pos": corners[0]},
+					{"color": "yellow", "fed": false, "pos": corners[1]},
+					{"color": "blue",   "fed": false, "pos": corners[2]},
+				]
+			for cd in color_defs:
+				var v = scenes["villager"].instantiate()
+				containers["villagers"].add_child(v)
+				v.setup(str(cd["color"]), cd["pos"] + Vector2(_rng.randf_range(-30, 30), _rng.randf_range(-30, 30)))
+				v.faction_id = _faction_id_map[fi]
+				if cd["fed"]:
+					v._satiation_timer = v.SATIATION_PER_LEVEL[1]
+					v.is_fed = true
 
-		if not is_survival:
-			# Place Town Hall at orb position — orb starts inside
-			if scenes.has("town_hall") and containers.has("town_halls"):
-				var th = scenes["town_hall"].instantiate()
-				containers["town_halls"].add_child(th)
-				th.global_position = orb_pos
-				th.placed_by_faction = _faction_id_map[fi]
-			var orb = scenes["villager"].instantiate()
-			containers["villagers"].add_child(orb)
-			orb.setup("magic_orb", orb_pos)
-			orb.faction_id = _faction_id_map[fi]
+			if not is_survival:
+				# Place Town Hall at orb position — orb starts inside
+				if scenes.has("town_hall") and containers.has("town_halls"):
+					var th = scenes["town_hall"].instantiate()
+					containers["town_halls"].add_child(th)
+					th.global_position = orb_pos
+					th.placed_by_faction = _faction_id_map[fi]
+				var orb = scenes["villager"].instantiate()
+				containers["villagers"].add_child(orb)
+				orb.setup("magic_orb", orb_pos)
+				orb.faction_id = _faction_id_map[fi]
 
 		if not stone_rd.is_empty():
 			var spos: Vector2 = room_pixel_pos(stone_rd["col"], stone_rd["row"])
 			var ssize: Vector2 = room_pixel_size(stone_rd["cw"], stone_rd["ch"])
 			var scenter: Vector2 = spos + ssize * 0.5
-			var bank = scenes["bank"].instantiate()
-			containers["banks"].add_child(bank)
-			bank.global_position = Vector2(scenter.x, spos.y + 200)
-			bank.placed_by_faction = -2
-			for i in _rng.randi_range(8, 12):
-				_spawn_stone(containers, scenes, spos, ssize)
+			if not _spawn_layout_contents(RT_STONE, stone_id, spos, ssize, containers, scenes, _faction_id_map[fi]):
+				var bank = scenes["bank"].instantiate()
+				containers["banks"].add_child(bank)
+				bank.global_position = Vector2(scenter.x, spos.y + 200)
+				bank.placed_by_faction = -2
+				for i in _rng.randi_range(8, 12):
+					_spawn_stone(containers, scenes, spos, ssize)
 
 		if not river_rd.is_empty():
 			var rpos: Vector2 = room_pixel_pos(river_rd["col"], river_rd["row"])
 			var rsize: Vector2 = room_pixel_size(river_rd["cw"], river_rd["ch"])
 			var rcenter: Vector2 = rpos + rsize * 0.5
-			var hut = scenes["hut"].instantiate()
-			containers["huts"].add_child(hut)
-			hut.global_position = rcenter
-			hut.placed_by_faction = -2
-			for i in _rng.randi_range(1, 3):
-				_spawn_fish(containers, scenes, rpos, rsize)
-			var room_node = room_map.get(river_id)
-			if room_node and scenes.has("river"):
-				var river_ob = scenes["river"].instantiate()
-				room_node.add_child(river_ob)
-				river_ob.position = Vector2(50, 50)
+			if not _spawn_layout_contents(RT_RIVER, river_id, rpos, rsize, containers, scenes, _faction_id_map[fi]):
+				var hut = scenes["hut"].instantiate()
+				containers["huts"].add_child(hut)
+				hut.global_position = rcenter
+				hut.placed_by_faction = -2
+				for i in _rng.randi_range(1, 3):
+					_spawn_fish(containers, scenes, rpos, rsize)
+				var room_node = room_map.get(river_id)
+				if room_node and scenes.has("river"):
+					var river_ob = scenes["river"].instantiate()
+					room_node.add_child(river_ob)
+					river_ob.position = Vector2(50, 50)
 
 
 # ==============================================================================

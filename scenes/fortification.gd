@@ -163,7 +163,9 @@ func _process(delta: float) -> void:
 			_health_label.add_theme_color_override("font_color", Color(0.7, 0.3, 0.2))
 		else:
 			_health_label.text = "HP: %d/%d" % [int(fort_health), int(MAX_HEALTH)]
-	queue_redraw()
+	_check_selection_redraw()
+	if not is_selected and get_sheltered_count() > 0:
+		queue_redraw()  # Range ring when garrisoned
 
 
 func _draw() -> void:

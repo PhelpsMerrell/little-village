@@ -29,10 +29,21 @@ func apply_training() -> void:
 		v.fire_rate_bonus += FIRE_RATE_BONUS_PER_NIGHT
 
 
+var _prev_count_text: String = ""
+
 func _process(_delta: float) -> void:
 	if _count_label:
-		_count_label.text = "%d/%d" % [get_sheltered_count(), capacity]
-	queue_redraw()
+		var txt: String = "%d/%d" % [get_sheltered_count(), capacity]
+		if txt != _prev_count_text:
+			_prev_count_text = txt
+			_count_label.text = txt
+	_check_selection_redraw()
+	# Training glow animation when reds are sheltered
+	if not is_selected:
+		for v in sheltered:
+			if is_instance_valid(v) and str(v.color_type) == "red":
+				queue_redraw()
+				break
 
 
 func _draw() -> void:

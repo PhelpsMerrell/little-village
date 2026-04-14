@@ -12,10 +12,15 @@ func _on_deposit(fid: int, amount: int) -> void:
 	Economy.add_fish(amount, fid)
 
 
+var _prev_count_text: String = ""
+
 func _process(_delta: float) -> void:
 	if _stored_label:
-		_stored_label.text = "Stored: %d" % stored_total
-	queue_redraw()
+		var txt: String = "Stored: %d" % stored_total
+		if txt != _prev_count_text:
+			_prev_count_text = txt
+			_stored_label.text = txt
+	_check_selection_redraw()
 
 
 func _draw() -> void:

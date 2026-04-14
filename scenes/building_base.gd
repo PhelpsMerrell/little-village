@@ -8,8 +8,19 @@ class_name BuildingBase
 @onready var _area: Area2D = $InputArea if has_node("InputArea") else null
 
 
+var _prev_selected: bool = false
+
 func _process(_delta: float) -> void:
-	queue_redraw()
+	_check_selection_redraw()
+
+
+func _check_selection_redraw() -> void:
+	## Call from subclass _process to handle selection change redraws.
+	if is_selected != _prev_selected:
+		_prev_selected = is_selected
+		queue_redraw()
+	elif is_selected:
+		queue_redraw()  # Pulse animation
 
 
 func is_sellable() -> bool:

@@ -1,3 +1,4 @@
+@tool
 extends Node2D
 class_name RoomTemplate
 ## Base class for room shape templates.

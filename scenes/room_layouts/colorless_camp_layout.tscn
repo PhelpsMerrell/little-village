@@ -1,0 +1,47 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/room_layouts/room_layout.gd" id="1_layout"]
+[ext_resource type="Script" path="res://scenes/room_layouts/room_spawn_marker.gd" id="2_marker"]
+
+[node name="ColorlessCampLayout" type="Node2D"]
+script = ExtResource("1_layout")
+
+[node name="Colorless01" type="Node2D" parent="."]
+position = Vector2(340, 360)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless02" type="Node2D" parent="."]
+position = Vector2(560, 280)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless03" type="Node2D" parent="."]
+position = Vector2(830, 330)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless04" type="Node2D" parent="."]
+position = Vector2(1010, 460)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless05" type="Node2D" parent="."]
+position = Vector2(310, 760)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless06" type="Node2D" parent="."]
+position = Vector2(560, 900)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless07" type="Node2D" parent="."]
+position = Vector2(830, 820)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"
+
+[node name="Colorless08" type="Node2D" parent="."]
+position = Vector2(1070, 700)
+script = ExtResource("2_marker")
+spawn_kind = "colorless"

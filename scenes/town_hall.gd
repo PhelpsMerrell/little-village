@@ -28,10 +28,15 @@ func can_house_villager(v: Node) -> bool:
 	return true
 
 
+var _prev_count_text: String = ""
+
 func _process(_delta: float) -> void:
 	if _count_label:
-		_count_label.text = "%d/%d" % [get_sheltered_count(), capacity]
-	queue_redraw()
+		var txt: String = "%d/%d" % [get_sheltered_count(), capacity]
+		if txt != _prev_count_text:
+			_prev_count_text = txt
+			_count_label.text = txt
+	_check_selection_redraw()
 
 
 func _draw() -> void:

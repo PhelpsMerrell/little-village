@@ -30,6 +30,16 @@ script = ExtResource("2_camera")
 
 [node name="Homes" type="Node2D" parent="."]
 
+[node name="Churches" type="Node2D" parent="."]
+
+[node name="Portals" type="Node2D" parent="."]
+
+[node name="Universities" type="Node2D" parent="."]
+
+[node name="Farms" type="Node2D" parent="."]
+
+[node name="TownHalls" type="Node2D" parent="."]
+
 [node name="FogOverlay" type="Node2D" parent="."]
 z_index = 100
 script = ExtResource("4_fog")

@@ -32,6 +32,7 @@ const IDLE_LOCAL_STEP_MIN := 14.0
 const IDLE_LOCAL_STEP_MAX := 34.0
 const SEPARATION_DIST := 8.0
 const SEPARATION_FORCE := 0.4
+const COMMAND_SPEED_MULT := 1.5  ## Player-commanded villagers move 50% faster
 
 @export var color_type: String = "red"
 
@@ -70,7 +71,7 @@ var fire_rate_bonus: float = 0.0  ## cumulative % reduction from university trai
 var is_fed: bool = true
 var _satiation_timer: float = 0.0  # seconds remaining before next fish needed
 
-const SATIATION_PER_LEVEL := [0.0, 1200.0, 2400.0, 600.0]  # L1=1day, L2=2days, L3=needs 2 fish/day (every half-day)
+const SATIATION_PER_LEVEL := [0.0, 600.0, 600.0, 600.0]  # All levels: 1 fish per game day (600s cycle)
 const L2_SPEED_MULT := 1.4  # L2 villagers move 40% faster
 const L3_BASE_LIFESPAN_DAYS: int = 2   ## All L3 units live 2 game-days without sustain
 
@@ -392,10 +393,16 @@ func _check_combat_command() -> bool:
 		_shoot_cooldown = get_shoot_cooldown()
 		_shot_flash_timer = 0.15
 		_set_target(combat_target.global_position)
-	elif combat_mode == "stun" and dist < radius + target_radius + 20.0:
+	elif combat_mode == "stun" and dist < radius + target_radius + 20.0 and _shoot_cooldown <= 0.0:
 		if combat_target.has_method("apply_stun"):
 			combat_target.apply_stun(2.0)
 		_shoot_cooldown = get_shoot_cooldown()
+		_shot_flash_timer = 0.15
+		# After successful stun, clear command so blue doesn't perma-chase
+		combat_target = null
+		combat_mode = ""
+		command_mode = "none"
+		return false
 	else:
 		_set_target(combat_target.global_position)
 
@@ -460,35 +467,33 @@ func _check_danger() -> bool:
 func _check_job() -> bool:
 	match color_type:
 		"yellow":
-			if is_carrying():
-				if has_deposit_in_room:
-					_brain_state = "deposit"; _set_target(deposit_position); return true
-				elif deposit_position != Vector2.ZERO:
-					_brain_state = "deposit_cross"; _set_target(deposit_position); return true
-				else:
-					_brain_state = "carry_wander"; return false
-			elif has_waypoint: _brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
-			elif brain_has_resource: _brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
-			elif assigned_room_id >= 0:
-				# Return to assigned room to keep collecting
-				_brain_state = "waypoint"; _set_target(_get_assigned_room_center()); return true
+			return _check_worker_job()
 		"blue":
+			# Blue pre-check: seek church when damaged
 			if not is_carrying() and brain_has_church and health < max_health:
 				_brain_state = "seek_church"; _set_target(brain_church_pos); return true
-			if is_carrying():
-				if has_deposit_in_room:
-					_brain_state = "deposit"; _set_target(deposit_position); return true
-				elif deposit_position != Vector2.ZERO:
-					_brain_state = "deposit_cross"; _set_target(deposit_position); return true
-				else:
-					_brain_state = "carry_wander"; return false
-			elif has_waypoint: _brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
-			elif brain_has_resource: _brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
-			elif assigned_room_id >= 0:
-				_brain_state = "waypoint"; _set_target(_get_assigned_room_center()); return true
+			return _check_worker_job()
 		"red": pass
-		"colorless":
-			pass
+		"colorless": pass
+	return false
+
+
+func _check_worker_job() -> bool:
+	## Shared gather→deposit→return loop for any resource-collecting villager.
+	## Works for yellows (stone/diamond/grain) and blues (fish) identically.
+	if is_carrying():
+		if has_deposit_in_room:
+			_brain_state = "deposit"; _set_target(deposit_position); return true
+		elif deposit_position != Vector2.ZERO:
+			_brain_state = "deposit_cross"; _set_target(deposit_position); return true
+		else:
+			_brain_state = "carry_wander"; return false
+	if has_waypoint:
+		_brain_state = "waypoint"; _set_target(waypoint_target_pos); return true
+	if brain_has_resource:
+		_brain_state = "collect"; _set_target(brain_nearest_resource_pos); return true
+	if assigned_room_id >= 0:
+		_brain_state = "waypoint"; _set_target(_get_assigned_room_center()); return true
 	return false
 
 
@@ -625,11 +630,16 @@ func _set_target_clamped(pos: Vector2) -> void:
 func _do_movement(delta: float) -> void:
 	if _arrived: return
 
+	# Player commands get a speed boost
+	var speed: float = _move_speed
+	if _brain_state in ["command_move", "break_door", "combat"]:
+		speed *= COMMAND_SPEED_MULT
+
 	# Break-door state: navigate straight to door, ignoring its wall segment
 	if _brain_state == "break_door":
 		var to_door := _move_target - global_position
 		var dist_d := to_door.length()
-		var step_d := _move_speed * delta
+		var step_d := speed * delta
 		if dist_d <= step_d or dist_d < 5.0:
 			global_position = _move_target
 			_arrived = true
@@ -657,7 +667,7 @@ func _do_movement(delta: float) -> void:
 		return
 
 	var to_target := effective_target - global_position
-	var dist := to_target.length(); var step := _move_speed * delta
+	var dist := to_target.length(); var step := speed * delta
 	if dist <= step or dist < 5.0:
 		global_position = effective_target
 		if _has_doorway_waypoint:
@@ -807,6 +817,13 @@ func _find_nearest_color(target_color: String) -> Node:
 	return best
 
 
+func _get_main_controller() -> Node:
+	var scene := get_tree().current_scene
+	if scene != null and scene.has_method("get_drag_target_for_villager"):
+		return scene
+	return null
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # INPUT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -816,6 +833,9 @@ func _on_area_input(_vp: Viewport, event: InputEvent, _idx: int) -> void:
 	if not FactionManager.is_local_faction(faction_id): return
 	if Input.is_key_pressed(KEY_SHIFT): return  # Shift = selection mode, suppress drag
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var main := _get_main_controller()
+		if main != null and main.has_method("can_drag_villager") and not main.can_drag_villager(self):
+			return
 		if is_puppet:
 			# Client: start local drag + notify host
 			_client_dragging = true
@@ -847,7 +867,12 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		if carrying_resource != "" and not is_puppet:
 			_drop_carried_resource()
-		global_position = get_global_mouse_position() + _drag_offset
+		var desired_pos := get_global_mouse_position() + _drag_offset
+		var main := _get_main_controller()
+		if main != null and main.has_method("get_drag_target_for_villager"):
+			global_position = main.get_drag_target_for_villager(self, desired_pos)
+		else:
+			global_position = desired_pos
 		if _client_dragging and _drag_send_timer >= DRAG_SEND_INTERVAL:
 			_drag_send_timer = 0.0
 			NetworkManager.send_command({
@@ -964,6 +989,17 @@ func _draw() -> void:
 		var lt: Vector2 = shoot_target_pos - global_position
 		draw_line(Vector2.ZERO, lt, Color(1.0, 0.3, 0.2, a), 2.0)
 		draw_circle(lt, 4.0, Color(1.0, 0.5, 0.2, a))
+
+	# Stun indicator
+	if _stun_timer > 0.0:
+		var star_a: float = 0.5 + sin(Time.get_ticks_msec() * 0.008) * 0.3
+		var star_col := Color(0.9, 0.8, 0.2, star_a)
+		var star_r: float = radius + 6.0
+		var spin: float = Time.get_ticks_msec() * 0.003
+		for i in 3:
+			var angle: float = spin + i * TAU / 3.0
+			var sp := Vector2(cos(angle), sin(angle)) * star_r * 0.6
+			draw_string(ThemeDB.fallback_font, sp + Vector2(-4, 4), "*", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, star_col)
 
 	# Move command direction indicator
 	if command_mode == "move_to":

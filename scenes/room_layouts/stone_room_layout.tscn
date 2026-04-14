@@ -1,0 +1,72 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/room_layouts/room_layout.gd" id="1_layout"]
+[ext_resource type="Script" path="res://scenes/room_layouts/room_spawn_marker.gd" id="2_marker"]
+
+[node name="StoneRoomLayout" type="Node2D"]
+script = ExtResource("1_layout")
+
+[node name="Bank" type="Node2D" parent="."]
+position = Vector2(675, 180)
+script = ExtResource("2_marker")
+spawn_kind = "bank"
+
+[node name="Stone01" type="Node2D" parent="."]
+position = Vector2(300, 470)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone02" type="Node2D" parent="."]
+position = Vector2(520, 410)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone03" type="Node2D" parent="."]
+position = Vector2(760, 430)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone04" type="Node2D" parent="."]
+position = Vector2(1020, 470)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone05" type="Node2D" parent="."]
+position = Vector2(250, 690)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone06" type="Node2D" parent="."]
+position = Vector2(470, 630)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone07" type="Node2D" parent="."]
+position = Vector2(690, 720)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone08" type="Node2D" parent="."]
+position = Vector2(910, 620)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone09" type="Node2D" parent="."]
+position = Vector2(1110, 720)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone10" type="Node2D" parent="."]
+position = Vector2(340, 940)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone11" type="Node2D" parent="."]
+position = Vector2(660, 980)
+script = ExtResource("2_marker")
+spawn_kind = "stone"
+
+[node name="Stone12" type="Node2D" parent="."]
+position = Vector2(980, 930)
+script = ExtResource("2_marker")
+spawn_kind = "stone"

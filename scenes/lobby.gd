@@ -10,6 +10,7 @@ var map_seed_text: String = ""
 var map_size: String = "medium"  ## "small", "medium", "large", "xl"
 var game_mode: String = "standard"  ## "standard" or "survival"
 var ai_count: int = 0  ## Number of AI opponents
+var faction_name: String = ""  ## Player's custom faction name
 var _hover: String = ""
 
 const MAP_SIZES: Array[String] = ["small", "medium", "large", "xl"]
@@ -92,6 +93,8 @@ func _input(event: InputEvent) -> void:
 				join_address = join_address.substr(0, join_address.length() - 1)
 			elif _typing_field == "seed" and map_seed_text.length() > 0:
 				map_seed_text = map_seed_text.substr(0, map_seed_text.length() - 1)
+			elif _typing_field == "faction_name" and faction_name.length() > 0:
+				faction_name = faction_name.substr(0, faction_name.length() - 1)
 		elif _typing_field == "address" and (event.ctrl_pressed or event.meta_pressed) and event.keycode == KEY_V:
 			var pasted := DisplayServer.clipboard_get()
 			if pasted != "":
@@ -100,6 +103,10 @@ func _input(event: InputEvent) -> void:
 			var pasted := DisplayServer.clipboard_get()
 			if pasted != "":
 				map_seed_text = _sanitize_seed(map_seed_text + pasted).substr(0, 12)
+		elif _typing_field == "faction_name" and (event.ctrl_pressed or event.meta_pressed) and event.keycode == KEY_V:
+			var pasted := DisplayServer.clipboard_get()
+			if pasted != "":
+				faction_name = _sanitize_faction_name(faction_name + pasted).substr(0, 20)
 		elif event.unicode > 0 and _state == "config":
 			var ch: String = char(event.unicode)
 			if _typing_field == "address" and join_address.length() < 80:
@@ -110,6 +117,10 @@ func _input(event: InputEvent) -> void:
 				var seed_candidate := _sanitize_seed(ch)
 				if seed_candidate != "":
 					map_seed_text += seed_candidate
+			elif _typing_field == "faction_name" and faction_name.length() < 20:
+				var name_candidate := _sanitize_faction_name(ch)
+				if name_candidate != "":
+					faction_name += name_candidate
 
 
 func _sanitize_address(text: String) -> String:
@@ -134,6 +145,15 @@ func _sanitize_seed(text: String) -> String:
 	for i in text.length():
 		var ch := text.substr(i, 1)
 		if ch.is_valid_int() or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z"):
+			out += ch
+	return out
+
+
+func _sanitize_faction_name(text: String) -> String:
+	var out := ""
+	for i in text.length():
+		var ch := text.substr(i, 1)
+		if ch.is_valid_int() or (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or ch == " " or ch == "_" or ch == "-":
 			out += ch
 	return out
 
@@ -180,6 +200,8 @@ func _handle_click(elem: String) -> void:
 					map_size = elem.substr(9)
 				if elem == "toggle_game_mode":
 					game_mode = "survival" if game_mode == "standard" else "standard"
+				if elem == "field_faction_name":
+					_typing_field = "faction_name"
 
 	elif _state == "waiting_host":
 		if elem == "launch":
@@ -222,8 +244,9 @@ func _on_start_pressed() -> void:
 	match net_mode:
 		"solo":
 			var solo_fid: int = NetworkManager.synced_peer_factions.get(1, 0)
+			var display_name: String = faction_name.strip_edges() if faction_name.strip_edges() != "" else FACTION_NAMES[solo_fid]
 			FactionManager.clear()
-			FactionManager.register_faction(solo_fid, FACTION_NAMES[solo_fid], FACTION_COLORS[solo_fid])
+			FactionManager.register_faction(solo_fid, display_name, FACTION_COLORS[solo_fid])
 			FactionManager.local_faction_id = solo_fid
 			FactionManager.game_mode = game_mode
 			# Register AI factions
@@ -277,9 +300,13 @@ func _launch_game() -> void:
 		used_factions[pfmap[pid]] = true
 	var fcount: int = used_factions.size()
 	FactionManager.clear()
+	var my_fid: int = pfmap.get(1, 0)
 	for fid in used_factions:
-		FactionManager.register_faction(fid, FACTION_NAMES[fid], FACTION_COLORS[fid])
-	FactionManager.local_faction_id = pfmap.get(1, 0)
+		var fname: String = FACTION_NAMES[fid]
+		if fid == my_fid and faction_name.strip_edges() != "":
+			fname = faction_name.strip_edges()
+		FactionManager.register_faction(fid, fname, FACTION_COLORS[fid])
+	FactionManager.local_faction_id = my_fid
 	FactionManager.max_population = max_pop
 	_set_game_config(fcount)
 	NetworkManager.broadcast_lobby_config(
@@ -299,7 +326,10 @@ func _on_game_started() -> void:
 		var fid: int = int(NetworkManager.synced_peer_factions[pid])
 		used[fid] = true
 	for fid in used:
-		FactionManager.register_faction(fid, FACTION_NAMES[fid], FACTION_COLORS[fid])
+		var fname: String = FACTION_NAMES[fid]
+		if fid == NetworkManager.get_faction_for_peer(NetworkManager.get_my_peer_id()) and faction_name.strip_edges() != "":
+			fname = faction_name.strip_edges()
+		FactionManager.register_faction(fid, fname, FACTION_COLORS[fid])
 	var my_peer: int = NetworkManager.get_my_peer_id()
 	FactionManager.local_faction_id = NetworkManager.get_faction_for_peer(my_peer)
 	FactionManager.max_population = NetworkManager.synced_max_population
@@ -394,8 +424,11 @@ func _get_solo_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	var ai_y: float = top + 300
 	if Rect2(cx + 60, ai_y - 4, 40, 32).has_point(pos): return "ai_up"
 	if Rect2(cx + 110, ai_y - 4, 40, 32).has_point(pos): return "ai_down"
+	# Faction Name
+	var fn_y: float = top + 350
+	if Rect2(cx + 10, fn_y - 2, 200, 28).has_point(pos): return "field_faction_name"
 	# Faction picker
-	var fy: float = top + 360
+	var fy: float = top + 400
 	for i in MAX_FACTIONS:
 		if Rect2(cx - 140 + i * 38, fy, 32, 32).has_point(pos): return "solo_f_%d" % i
 	# Start
@@ -419,6 +452,9 @@ func _get_host_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	# Seed
 	var seed_y: float = top + 250
 	if Rect2(cx + 10, seed_y - 2, 160, 28).has_point(pos): return "field_seed"
+	# Faction Name
+	var fn_y: float = top + 300
+	if Rect2(cx + 10, fn_y - 2, 200, 28).has_point(pos): return "field_faction_name"
 	# Start
 	if Rect2(cx - 100, vp.y - 100, 200, 50).has_point(pos): return "start"
 	return ""
@@ -428,6 +464,9 @@ func _get_join_element(pos: Vector2, vp: Vector2, cx: float, top: float) -> Stri
 	# Address field
 	var addr_y: float = top + 100
 	if Rect2(cx - 30, addr_y - 2, 220, 28).has_point(pos): return "field_address"
+	# Faction Name
+	var fn_y: float = top + 160
+	if Rect2(cx + 10, fn_y - 2, 200, 28).has_point(pos): return "field_faction_name"
 	# Submit
 	if Rect2(cx - 100, vp.y - 100, 200, 50).has_point(pos): return "start"
 	return ""
@@ -544,8 +583,21 @@ func _draw_solo_config(vp: Vector2, cx: float, top: float) -> void:
 	_draw_btn(cx + 60, ai_y - 4, 40, 32, "+", "ai_up")
 	_draw_btn(cx + 110, ai_y - 4, 40, 32, "-", "ai_down")
 
+	# Faction Name
+	var fn_y: float = top + 350
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fn_y + 18), "Faction Name:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	var fn_active: bool = (_typing_field == "faction_name")
+	var fn_display: String = faction_name if faction_name != "" else "(enter name)"
+	draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.15, 0.15, 0.2, 0.9) if fn_active else Color(0.1, 0.1, 0.14, 0.8))
+	if fn_active:
+		draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.4, 0.5, 0.6, 0.5), false, 1.5)
+	var fn_cur: String = "|" if fn_active and int(Time.get_ticks_msec() / 500) % 2 == 0 else ""
+	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, fn_y + 16), fn_display + fn_cur,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if faction_name != "" else Color(0.45, 0.45, 0.45))
+
 	# Faction picker
-	var fy: float = top + 360
+	var fy: float = top + 400
 	var solo_fid: int = NetworkManager.synced_peer_factions.get(1, 0)
 	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fy - 6), "Faction:",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.55, 0.55, 0.6))
@@ -603,6 +655,19 @@ func _draw_host_config(vp: Vector2, cx: float, top: float) -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, seed_y + 16), sd + cur,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if map_seed_text != "" else Color(0.45, 0.45, 0.45))
 
+	# Faction Name
+	var fn_y: float = top + 300
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fn_y + 18), "Faction Name:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	var fn_active: bool = (_typing_field == "faction_name")
+	var fn_display: String = faction_name if faction_name != "" else "(enter name)"
+	draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.15, 0.15, 0.2, 0.9) if fn_active else Color(0.1, 0.1, 0.14, 0.8))
+	if fn_active:
+		draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.4, 0.5, 0.6, 0.5), false, 1.5)
+	var fn_cur: String = "|" if fn_active and int(Time.get_ticks_msec() / 500) % 2 == 0 else ""
+	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, fn_y + 16), fn_display + fn_cur,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if faction_name != "" else Color(0.45, 0.45, 0.45))
+
 	_draw_start_btn(vp, cx, "HOST")
 
 
@@ -636,6 +701,19 @@ func _draw_join_config(vp: Vector2, cx: float, top: float) -> void:
 		else:
 			draw_string(ThemeDB.fallback_font, Vector2(cx - 140, addr_y + 80), _connect_status,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, status_col)
+
+	# Faction Name
+	var fn_y: float = top + 160
+	draw_string(ThemeDB.fallback_font, Vector2(cx - 140, fn_y + 18), "Faction Name:",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.75, 0.75, 0.75))
+	var fn_active: bool = (_typing_field == "faction_name")
+	var fn_display: String = faction_name if faction_name != "" else "(enter name)"
+	draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.15, 0.15, 0.2, 0.9) if fn_active else Color(0.1, 0.1, 0.14, 0.8))
+	if fn_active:
+		draw_rect(Rect2(cx + 10, fn_y - 2, 200, 28), Color(0.4, 0.5, 0.6, 0.5), false, 1.5)
+	var fn_cur: String = "|" if fn_active and int(Time.get_ticks_msec() / 500) % 2 == 0 else ""
+	draw_string(ThemeDB.fallback_font, Vector2(cx + 18, fn_y + 16), fn_display + fn_cur,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.9, 0.7) if faction_name != "" else Color(0.45, 0.45, 0.45))
 
 	_draw_start_btn(vp, cx, "JOIN")
 

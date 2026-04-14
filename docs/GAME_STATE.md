@@ -93,7 +93,7 @@ All L3 units have a **2-day base lifespan** (`L3_BASE_LIFESPAN_DAYS = 2`).
 - Timer clears if villager is shifted back below L3.
 
 ### Sustain Conditions
-- **Red L3**: Each fish eaten via the hunger system calls `extend_l3_lifespan()`, resetting the timer. Satiation interval for L3 is 600s (every half-day = 2 fish/day required).
+- **Red L3**: Each fish eaten via the hunger system calls `extend_l3_lifespan()`, resetting the timer.
 - **Blue L3**: If sheltered in a church during the night and still inside at dawn, `extend_l3_lifespan()` is called in `_on_phase_changed()`.
 - **Yellow L3**: No sustain — expires after exactly 2 days. (Yellow L3 can still be shifted by any source.)
 
@@ -106,9 +106,9 @@ Resets `_l3_lifespan_timer = L3_BASE_LIFESPAN_DAYS × GameClock.DAY_DURATION`.
 
 Managed in `main.gd._process_red_hunger()`. Only red villagers have hunger.
 
-- `SATIATION_PER_LEVEL = [0.0, 1200.0, 2400.0, 600.0]` — L3 now 600s (half-day) requiring ~2 fish/day.
+- `SATIATION_PER_LEVEL = [0.0, 600.0, 600.0, 600.0]` — 1 fish per game day (600s cycle) at all levels.
 - When satiation runs out, checks `Economy.get_fish(faction_id)`. If available, consumes 1 fish and resets timer.
-- If no fish: `is_fed = false`, takes `RED_STARVE_DPS` damage per second. Dies at 0 HP.
+- If no fish: `is_fed = false`, takes `RED_STARVE_DPS` (50/1200 ≈ 0.042) damage per second. Dies at 0 HP after ~2 game days.
 - L3 red: each fish also calls `extend_l3_lifespan()`.
 
 ---
@@ -125,9 +125,9 @@ Commands: `command_attack(target)` and `command_stun(target)` on villager.gd.
 
 - Sets `command_mode = "combat"`, `combat_target`, `combat_mode`.
 - `_check_combat_command()` runs in brain (priority: after command, before danger).
-- **Attack** (red only): moves to SHOOT_RANGE, fires. Deals `10 × level` damage per shot. Target keeps faction.
-- **Stun** (blue only): moves to melee range, calls `combat_target.apply_stun(2.0)`. Stun freezes target brain for 2s.
-- Combat persists until: target dies, player issues release command, or new command issued.
+- **Attack** (red only): moves to SHOOT_RANGE, fires. Deals `10 × level` damage per shot. Target keeps faction. Persists until target dies or command cleared.
+- **Stun** (blue only): moves to melee range, calls `combat_target.apply_stun(2.0)`. Stun freezes target brain for 2s. One-shot: command clears after successful stun. Respects shoot cooldown.
+- Stunned villagers show spinning gold stars and skip all brain evaluation.
 
 ### Player Flow
 1. Select red/blue villagers.
@@ -232,3 +232,130 @@ Autoload: `TutorialManager` (`autoload/tutorial_manager.gd`).
 
 - Dawn: releases sheltered villagers, despawns night enemies, checks blue L3 church sustain, checks red survival for tutorial.
 - Dusk: auto-shelters villagers (except red L3), spawns night wave if event active.
+
+---
+
+## Town Hall (New)
+
+`TownHall` extends `HousingBuilding`. Placed in each faction's core room at map generation. The magic orb starts at the Town Hall's position.
+
+- **Capacity**: 8 villagers
+- **Intake radius**: 90
+- **Placed by faction**: Uses faction's actual ID (not `-2` preplaced for player-owned town halls generated per-faction)
+- **Preplaced acceptance**: `can_house_villager()` allows any faction when `placed_by_faction == -2`
+- **Integrated into**: auto-shelter, dawn release, building influence, night proximity shelter, elimination transfer, HUD building info, house commands, building click selection
+- **Scene**: `scenes/town_hall.tscn` — larger visual footprint with spire, windows, foundation, and "TOWN HALL" label
+
+---
+
+## Room Templates (New)
+
+`RoomTemplate` (`@tool`) base class in `scenes/room_templates/room_template.gd`. Defines room shapes as `@export var cells: Array[Vector2i]` — editable in the Godot editor.
+
+### 8 Template Scenes
+- `single_square.tscn` — 1×1
+- `big_square.tscn` — 2×2
+- `horizontal_bar.tscn` — 3×1
+- `vertical_bar.tscn` — 1×3
+- `l_shape.tscn` — 3 tall + 1 right (4 cells)
+- `reverse_l_shape.tscn` — mirrored L (4 cells)
+- `t_shape.tscn` — 3 across + 2 down from center (5 cells)
+- `plus_shape.tscn` — cross/plus (5 cells)
+
+### Map Generator Integration
+- `_load_room_templates()`: Loads all template scenes, extracts cell patterns, sorts by size descending
+- `_place_footprints_from_templates()`: Places rooms using arbitrary cell patterns (non-rectangular supported)
+- Falls back to `_place_footprints_rectangular()` (original FOOTPRINTS) if templates fail to load
+- Helper functions: `_can_place_cells()`, `_mark_grid_cells()`, `_cells_bounding_box()`
+
+---
+
+## Performance Architecture
+
+### Spatial Room Grid
+`main.gd` maintains `_room_grid: Dictionary` mapping pixel-space grid cells (64px) to room IDs. Built once via `_build_room_grid()` after map generation. `_room_id_at()` is O(1) dictionary lookup with fallback linear scan.
+
+### Room-Scoped Processing
+- **Pickups**: `_process_stone_pickups()` / `_process_fish_pickups()` only check villagers in the same room as each resource
+- **Deposits**: `_process_deposits()` only checks villagers in the same room as each bank/hut
+- **Brain context**: Pre-built per-room caches for resources (`room_stones`, `room_fish`), deposit buildings (`room_banks`, `room_huts`), buildings (`room_building_cache`), and adjacent room centers (`room_adj_centers`)
+
+### Staggered Brain Ticks
+Villagers have `_brain_frame_offset` (randomized at creation) and `BRAIN_SKIP_FRAMES = 3`. Idle+arrived villagers only evaluate brain every 3 frames, staggered across the population. Active states (danger, job, command, combat) always think every frame.
+
+### Conditional Redraws
+- **Buildings**: `BuildingBase._check_selection_redraw()` — only redraws on selection change or while selected. Subclasses call this instead of unconditional `queue_redraw()`.
+- **Rooms**: `room.gd` only redraws when ownership or capture progress changes
+- **Enemies**: Only redraw when stunned, L3 (health bar), or L1 with active dupe meter
+- **Fish spots**: Skip bobbing animation when not visible
+
+---
+
+## Villager AI Architecture
+
+### Brain Priority (unchanged)
+1. **COMMAND** — player move/hold/break_door/combat commands
+2. **DANGER** — enemy nearby, color-specific reaction
+3. **JOB** — resource collection/deposit loop
+4. **INFLUENCE** — (currently passthrough, meter fills elsewhere)
+5. **IDLE** — wander, visit buildings, socialize, explore rooms
+
+### Shared Worker Pattern
+`_check_worker_job()` — unified gather→deposit→return loop used by both yellows and blues:
+1. If carrying → find deposit in room (O(1) cache) → cross-room deposit → carry_wander
+2. If has waypoint → go to waypoint
+3. If has resource in room → collect nearest
+4. If has assigned room → return to work room
+
+Blue pre-check: seek church when damaged (before shared loop).
+
+### Idle Behavior System
+When no higher-priority state applies, villagers pick from weighted idle behaviors:
+- **Stand/jiggle** (60%) — stay put or tiny local step
+- **Building visit** (35%) — walk to a building in the room
+- **Social visit** (35%) — walk near another villager in the room
+- **Room travel** (30%) — walk to an adjacent room's center through an open door
+- **Local step** — random walk within room bounds
+
+`brain_buildings` and `brain_room_centers` are populated per-frame from room-level caches built in `_update_brain_context()`.
+
+---
+
+## Preplaced Building Faction Rules
+
+Buildings with `placed_by_faction = -2` (preplaced/map-generated) accept **any faction** for deposits, housing, and other interactions. Buildings with `placed_by_faction = -1` (neutral/unassigned) reject all interactions. Buildings with `placed_by_faction >= 0` (player-placed) only accept matching faction.
+
+This applies uniformly to: `ResourceBuilding.accepts_villager()`, `Bank.accepts_villager()`, `HousingBuilding.can_house_villager()`, and `TownHall.can_house_villager()`.
+
+---
+
+## Faction Naming
+
+Players name their faction before starting a game via a text field in the solo lobby config. The name is passed to `FactionManager.register_faction()`. If left empty, falls back to the faction symbol. Max 20 characters, alphanumeric plus spaces/hyphens/underscores.
+
+---
+
+## Hunger / Satiation
+
+Red villagers require fish to survive. Managed by `_process_red_hunger()` in `main.gd`.
+
+- **Consumption**: 1 fish per game day (600s cycle) at all levels. `SATIATION_PER_LEVEL = [0, 600, 600, 600]`.
+- **Starvation**: When unfed, health drains at `RED_STARVE_DPS = 50/1200` (~0.042 HP/s). At 50 HP (L1/L2 base), death takes 2 full game days (1200s). L3 with 100 HP takes 4 days.
+- **Fish source**: Blues collect fish from rivers/fish spots and deposit at fishing huts. Economy stores faction fish count.
+- **Visual**: Unfed reds show "HUNGRY" label and darkened pulsing body color.
+
+---
+
+## PvP Combat
+
+### Red Attack (Player-Commanded)
+Reds can be commanded to attack other-faction villagers or map enemies. Damage = `10.0 × level` per shot. Triggers war state between factions.
+
+### Blue Stun (Player-Commanded)
+Blues can be commanded to stun other-faction villagers. Stun freezes the target for 2.0 seconds. One-shot action: after a successful stun, the blue clears its combat command and returns to normal behavior. Stun respects `_shoot_cooldown` to prevent spam.
+
+### Stun Visual
+Stunned villagers display three spinning gold stars orbiting their body. Stars pulse in opacity and rotate continuously. Stunned villagers skip all brain evaluation until the timer expires.
+
+### Command Speed
+Villagers following player commands (`command_move`, `break_door`, `combat`) move 50% faster than their base speed (`COMMAND_SPEED_MULT = 1.5`).

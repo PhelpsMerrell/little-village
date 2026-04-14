@@ -148,7 +148,9 @@ func _process(delta: float) -> void:
 				_do_paused(delta)
 			State.STUNNED:
 				_do_stunned(delta)
-	queue_redraw()
+	# Only redraw when there's dynamic overlay content
+	if _state == State.STUNNED or (level == 3) or (level == 1 and dupe_meter > 0.01):
+		queue_redraw()
 
 
 func _do_moving(delta: float) -> void:

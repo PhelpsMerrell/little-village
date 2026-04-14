@@ -24,10 +24,21 @@ func heal_tick(delta: float) -> void:
 		release_villager(v)
 
 
+var _prev_count_text: String = ""
+
 func _process(_delta: float) -> void:
 	if _count_label:
-		_count_label.text = "%d/%d" % [get_sheltered_count(), capacity]
-	queue_redraw()
+		var txt: String = "%d/%d" % [get_sheltered_count(), capacity]
+		if txt != _prev_count_text:
+			_prev_count_text = txt
+			_count_label.text = txt
+	_check_selection_redraw()
+	# Healing glow animation when blues are sheltered
+	if not is_selected:
+		for v in sheltered:
+			if is_instance_valid(v) and str(v.color_type) == "blue":
+				queue_redraw()
+				break
 
 
 func _draw() -> void:
